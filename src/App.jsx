@@ -223,7 +223,7 @@ export default function App() {
       setView('landing');
       showToast('Logged in as club coordinator');
     } else {
-      showToast('Invalid credentials. Use admin/admin6767 or user/user123');
+      showToast('Invalid username or password');
     }
   };
 
@@ -914,7 +914,7 @@ ${formData.description}`;
                   className="form-input" 
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. user or admin"
+                  placeholder="e.g. johndoe"
                   required
                 />
               </div>
