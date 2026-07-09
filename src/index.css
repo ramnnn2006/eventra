@@ -791,8 +791,16 @@ input, select, textarea, button {
 
 /* Simple responsive rules */
 @media (max-width: 768px) {
+  .top-nav {
+    padding: 12px 16px;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    text-align: center;
+  }
+  
   .wizard-body {
-    padding: 24px;
+    padding: 24px 16px;
   }
   
   .review-data-grid {
@@ -805,5 +813,60 @@ input, select, textarea, button {
   
   .form-row {
     grid-template-columns: 1fr;
+  }
+  
+  .preview-container {
+    padding: 24px 16px;
+    font-size: 12px;
+  }
+  
+  .doc-table {
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .doc-signatures {
+    flex-direction: column;
+    gap: 32px;
+    align-items: center;
+  }
+  
+  .doc-sig-block {
+    width: 100%;
+  }
+
+  .admin-layout {
+    flex-direction: column;
+  }
+
+  .admin-sidebar {
+    width: 100%;
+    padding: 24px 16px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-light);
+    gap: 16px;
+  }
+
+  .admin-main {
+    padding: 24px 16px;
+  }
+  
+  .preview-nav {
+    flex-direction: column;
+    gap: 12px;
+    align-items: stretch;
+  }
+  
+  .preview-nav .btn {
+    width: 100%;
+  }
+  
+  .preview-nav div {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
   }
 }

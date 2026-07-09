@@ -1,0 +1,21 @@
+{
+   "short_name": "MIC Reporter",
+   "name": "MIC Event Report Generator",
+   "icons": [
+     {
+       "src": "/favicon.svg",
+       "type": "image/svg+xml",
+       "sizes": "any"
+     },
+     {
+       "src": "/vitclogo.png",
+       "type": "image/png",
+       "sizes": "512x512"
+     }
+   ],
+   "start_url": "/",
+   "background_color": "#f8f9fa",
+   "theme_color": "#0f766e",
+   "display": "standalone",
+   "orientation": "portrait"
+ }
