@@ -7,6 +7,7 @@ import {
 import Papa from 'papaparse';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
+import { useQuery, useMutation } from "convex/react";
 
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
 
@@ -20,7 +21,66 @@ const escapeHtml = (unsafe) => {
     .replace(/'/g, '&#039;');
 };
 
+function ConvexWrapper({ children, setDb }) {
+  const coordinators = useQuery("db:getCoordinators");
+  const venues = useQuery("db:getVenues");
+  const eventTypes = useQuery("db:getEventTypes");
+  const reports = useQuery("db:getReports");
+
+  const addCoordinator = useMutation("db:addCoordinator");
+  const removeCoordinator = useMutation("db:removeCoordinator");
+  const addVenue = useMutation("db:addVenue");
+  const removeVenue = useMutation("db:removeVenue");
+  const addEventType = useMutation("db:addEventType");
+  const removeEventType = useMutation("db:removeEventType");
+  const addReport = useMutation("db:addReport");
+  const removeReport = useMutation("db:removeReport");
+
+  useEffect(() => {
+    setDb({
+      coordinators: coordinators || [],
+      venues: venues || [],
+      eventTypes: eventTypes || [],
+      uploadedReports: reports || [],
+      addCoordinator: async (empId, name, department, signature) => {
+        await addCoordinator({ empId, name, department, signature });
+      },
+      removeCoordinator: async (id) => {
+        await removeCoordinator({ id });
+      },
+      addVenue: async (name) => {
+        await addVenue({ name });
+      },
+      removeVenue: async (id) => {
+        await removeVenue({ id });
+      },
+      addEventType: async (name) => {
+        await addEventType({ name });
+      },
+      removeEventType: async (id) => {
+        await removeEventType({ id });
+      },
+      addReport: async (title, type, date, fileName, fileData) => {
+        await addReport({ title, type, date, fileName, fileData, uploadedAt: new Date().toLocaleDateString() });
+      },
+      removeReport: async (id) => {
+        await removeReport({ id });
+      }
+    });
+  }, [
+    coordinators, venues, eventTypes, reports,
+    addCoordinator, removeCoordinator, addVenue, removeVenue,
+    addEventType, removeEventType, addReport, removeReport,
+    setDb
+  ]);
+
+  return children;
+}
+
 export default function App() {
+  const isConvexEnabled = !!import.meta.env.VITE_CONVEX_URL;
+  const [convexDb, setConvexDb] = useState(null);
+
   // Navigation & Auth (Session persisted via sessionStorage)
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [userRole, setUserRole] = useState(() => sessionStorage.getItem('mic_user_role') || null);
@@ -459,7 +519,7 @@ ${formData.description}`;
   };
 
   // Direct completed report upload
-  const handleCompletedReportUpload = (e) => {
+  const handleCompletedReportUpload = async (e) => {
     const file = e.target.files?.[0];
     const eventName = prompt('Enter the Event Name for this report:');
     if (!file || !eventName) return;
@@ -472,17 +532,21 @@ ${formData.description}`;
       .replace(/\s+/g, '_');
     const newFilename = `${cleanName}_report.docx`;
 
-    const newReport = {
-      id: Date.now(),
-      eventName: eventName,
-      filename: newFilename,
-      uploadDate: new Date().toLocaleDateString(),
-      status: 'Pending Review'
-    };
-
-    const updated = [...uploadedReports, newReport];
-    setUploadedReports(updated);
-    localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+    if (convexDb) {
+      // For Convex, store simulated base64 to avoid huge binary transfer issues in cloud dev functions
+      await convexDb.addReport(eventName, 'Direct Upload', new Date().toLocaleDateString(), newFilename, 'base64_simulated_contents');
+    } else {
+      const newReport = {
+        id: Date.now(),
+        eventName: eventName,
+        filename: newFilename,
+        uploadDate: new Date().toLocaleDateString(),
+        status: 'Pending Review'
+      };
+      const updated = [...uploadedReports, newReport];
+      setUploadedReports(updated);
+      localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+    }
     showToast(`Report uploaded and saved as ${newFilename}`);
     
     // Clear input
@@ -821,16 +885,20 @@ ${formData.description}`;
   };
 
   // Add faculty coordinator in admin panel
-  const handleAddFaculty = (e) => {
+  const handleAddFaculty = async (e) => {
     e.preventDefault();
     if (!newFaculty.empId || !newFaculty.name || !newFaculty.department) {
       showToast('Please fill all fields');
       return;
     }
 
-    const updated = [...coordinators, newFaculty];
-    setCoordinators(updated);
-    localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+    if (convexDb) {
+      await convexDb.addCoordinator(newFaculty.empId, newFaculty.name, newFaculty.department, newFaculty.signature || '');
+    } else {
+      const updated = [...coordinators, newFaculty];
+      setCoordinators(updated);
+      localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+    }
     setNewFaculty({ empId: '', name: '', department: '', signature: '' });
     showToast('Faculty coordinator added');
     if (facSigInputRef.current) facSigInputRef.current.value = '';
@@ -847,46 +915,66 @@ ${formData.description}`;
     }
   };
 
-  const deleteFaculty = (empId) => {
+  const deleteFaculty = async (coord) => {
     if (window.confirm('Delete this coordinator?')) {
-      const updated = coordinators.filter(c => c.empId !== empId);
-      setCoordinators(updated);
-      localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+      if (convexDb) {
+        await convexDb.removeCoordinator(coord._id);
+      } else {
+        const updated = coordinators.filter(c => c.empId !== coord.empId);
+        setCoordinators(updated);
+        localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+      }
       showToast('Faculty coordinator deleted');
     }
   };
 
   // Config adjustments in admin panel
-  const addVenue = () => {
-    if (newVenue.trim() && !venues.includes(newVenue.trim())) {
-      const updated = [...venues, newVenue.trim()];
-      setVenues(updated);
-      localStorage.setItem('mic_venues', JSON.stringify(updated));
+  const addVenue = async () => {
+    if (newVenue.trim() && !venuesList.includes(newVenue.trim())) {
+      if (convexDb) {
+        await convexDb.addVenue(newVenue.trim());
+      } else {
+        const updated = [...venues, newVenue.trim()];
+        setVenues(updated);
+        localStorage.setItem('mic_venues', JSON.stringify(updated));
+      }
       setNewVenue('');
       showToast('Venue added');
     }
   };
 
-  const deleteVenue = (venue) => {
-    const updated = venues.filter(v => v !== venue);
-    setVenues(updated);
-    localStorage.setItem('mic_venues', JSON.stringify(updated));
+  const deleteVenue = async (venue) => {
+    if (convexDb) {
+      await convexDb.removeVenue(venue._id);
+    } else {
+      const updated = venues.filter(v => v !== venue);
+      setVenues(updated);
+      localStorage.setItem('mic_venues', JSON.stringify(updated));
+    }
   };
 
-  const addEventType = () => {
-    if (newEventType.trim() && !eventTypes.includes(newEventType.trim())) {
-      const updated = [...eventTypes, newEventType.trim()];
-      setEventTypes(updated);
-      localStorage.setItem('mic_event_types', JSON.stringify(updated));
+  const addEventType = async () => {
+    if (newEventType.trim() && !eventTypesList.includes(newEventType.trim())) {
+      if (convexDb) {
+        await convexDb.addEventType(newEventType.trim());
+      } else {
+        const updated = [...eventTypes, newEventType.trim()];
+        setEventTypes(updated);
+        localStorage.setItem('mic_event_types', JSON.stringify(updated));
+      }
       setNewEventType('');
       showToast('Event type added');
     }
   };
 
-  const deleteEventType = (type) => {
-    const updated = eventTypes.filter(t => t !== type);
-    setEventTypes(updated);
-    localStorage.setItem('mic_event_types', JSON.stringify(updated));
+  const deleteEventType = async (type) => {
+    if (convexDb) {
+      await convexDb.removeEventType(type._id);
+    } else {
+      const updated = eventTypes.filter(t => t !== type);
+      setEventTypes(updated);
+      localStorage.setItem('mic_event_types', JSON.stringify(updated));
+    }
   };
 
   // Replaced template upload
@@ -898,7 +986,14 @@ ${formData.description}`;
     }
   };
 
-  return (
+  const coordinatorsList = convexDb ? convexDb.coordinators : coordinators;
+  const venuesRaw = convexDb ? convexDb.venues : venues;
+  const venuesList = convexDb ? convexDb.venues.map(v => typeof v === 'object' ? v.name : v) : venues;
+  const eventTypesRaw = convexDb ? convexDb.eventTypes : eventTypes;
+  const eventTypesList = convexDb ? convexDb.eventTypes.map(t => typeof t === 'object' ? t.name : t) : eventTypes;
+  const uploadedReportsList = convexDb ? convexDb.uploadedReports : uploadedReports;
+
+  const mainContent = (
     <div className="app-container">
       {/* Top navbar (if logged in) */}
       {userRole !== null && (
@@ -1244,7 +1339,7 @@ ${formData.description}`;
                         value={formData.eventType}
                         onChange={(e) => setFormData(prev => ({ ...prev, eventType: e.target.value }))}
                       >
-                        {eventTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                        {eventTypesList.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
                     
@@ -1314,7 +1409,7 @@ ${formData.description}`;
                         value={formData.venue}
                         onChange={(e) => setFormData(prev => ({ ...prev, venue: e.target.value }))}
                       >
-                        {venues.map(v => <option key={v} value={v}>{v}</option>)}
+                        {venuesList.map(v => <option key={v} value={v}>{v}</option>)}
                       </select>
                     </div>
 
@@ -1348,7 +1443,7 @@ ${formData.description}`;
                       onChange={(e) => setFormData(prev => ({ ...prev, coord1: e.target.value }))}
                     >
                       <option value="">Select Faculty...</option>
-                      {coordinators.map(c => (
+                      {coordinatorsList.map(c => (
                         <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
                       ))}
                     </select>
@@ -1362,7 +1457,7 @@ ${formData.description}`;
                       onChange={(e) => setFormData(prev => ({ ...prev, coord2: e.target.value }))}
                     >
                       <option value="">Select Faculty...</option>
-                      {coordinators.map(c => (
+                      {coordinatorsList.map(c => (
                         <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
                       ))}
                     </select>
@@ -2170,16 +2265,22 @@ ${formData.description}`;
                           </tr>
                         </thead>
                         <tbody>
-                          {uploadedReports.map(rep => (
-                            <tr key={rep.id}>
-                              <td style={{ fontWeight: 500 }}>{rep.eventName}</td>
-                              <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{rep.filename}</td>
-                              <td>{rep.uploadDate}</td>
-                              <td>
-                                <span className="badge badge-success">{rep.status}</span>
-                              </td>
-                            </tr>
-                          ))}
+                          {uploadedReportsList.map(rep => {
+                            const eventName = rep.eventName || rep.title || 'Event Report';
+                            const filename = rep.filename || rep.fileName || 'report.docx';
+                            const uploadDate = rep.uploadDate || rep.uploadedAt || 'Today';
+                            const id = rep.id || rep._id;
+                            return (
+                              <tr key={id}>
+                                <td style={{ fontWeight: 500 }}>{eventName}</td>
+                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{filename}</td>
+                                <td>{uploadDate}</td>
+                                <td>
+                                  <span className="badge badge-success">{rep.status || 'Saved'}</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     ) : (
@@ -2266,8 +2367,8 @@ ${formData.description}`;
                         </tr>
                       </thead>
                       <tbody>
-                        {coordinators.map(c => (
-                          <tr key={c.empId}>
+                        {coordinatorsList.map(c => (
+                          <tr key={c._id || c.empId}>
                             <td>{c.empId}</td>
                             <td style={{ fontWeight: 500 }}>{c.name}</td>
                             <td>{c.department}</td>
@@ -2279,7 +2380,7 @@ ${formData.description}`;
                               )}
                             </td>
                             <td>
-                              <button className="btn btn-danger" onClick={() => deleteFaculty(c.empId)} style={{ padding: '4px 8px', fontSize: 12 }}>
+                              <button className="btn btn-danger" onClick={() => deleteFaculty(c)} style={{ padding: '4px 8px', fontSize: 12 }}>
                                 Delete
                               </button>
                             </td>
@@ -2315,14 +2416,18 @@ ${formData.description}`;
                       </div>
                       
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-                        {eventTypes.map(t => (
-                          <div key={t} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border-light)', borderRadius: 6 }}>
-                            <span style={{ fontSize: 14 }}>{t}</span>
-                            <button className="btn btn-link" onClick={() => deleteEventType(t)} style={{ color: '#b91c1c' }}>
-                              <Trash size={14} />
-                            </button>
-                          </div>
-                        ))}
+                        {eventTypesRaw.map(t => {
+                          const name = typeof t === 'object' ? t.name : t;
+                          const id = typeof t === 'object' ? t._id : t;
+                          return (
+                            <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border-light)', borderRadius: 6 }}>
+                              <span style={{ fontSize: 14 }}>{name}</span>
+                              <button className="btn btn-link" onClick={() => deleteEventType(t)} style={{ color: '#b91c1c' }}>
+                                <Trash size={14} />
+                              </button>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
 
@@ -2342,16 +2447,20 @@ ${formData.description}`;
                       </div>
                       
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-                        {venues.map(v => (
-                          <div key={v} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border-light)', borderRadius: 6 }}>
-                            <span style={{ fontSize: 14 }}>{v}</span>
-                            {v !== 'Classroom' && v !== 'Other' && (
-                              <button className="btn btn-link" onClick={() => deleteVenue(v)} style={{ color: '#b91c1c' }}>
-                                <Trash size={14} />
-                              </button>
-                            )}
-                          </div>
-                        ))}
+                        {venuesRaw.map(v => {
+                          const name = typeof v === 'object' ? v.name : v;
+                          const id = typeof v === 'object' ? v._id : v;
+                          return (
+                            <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border-light)', borderRadius: 6 }}>
+                              <span style={{ fontSize: 14 }}>{name}</span>
+                              {name !== 'Classroom' && name !== 'Other' && (
+                                <button className="btn btn-link" onClick={() => deleteVenue(v)} style={{ color: '#b91c1c' }}>
+                                  <Trash size={14} />
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                   </div>
@@ -2444,4 +2553,9 @@ ${formData.description}`;
       </div>
     </div>
   );
+
+  if (isConvexEnabled) {
+    return <ConvexWrapper setDb={setConvexDb}>{mainContent}</ConvexWrapper>;
+  }
+  return mainContent;
 }
