@@ -104,6 +104,13 @@ export default function App() {
   
   // Theme state
   const [accent, setAccent] = useState({ name: 'teal', h: 170, s: 75, l: 35 });
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+  const [validationErrors, setValidationErrors] = useState({});
+
+  useEffect(() => {
+    document.body.className = theme === 'dark' ? 'dark-theme' : '';
+    localStorage.setItem('theme', theme);
+  }, [theme]);
   
   // App settings & collections (persisted in localStorage)
   const [coordinators, setCoordinators] = useState([]);
@@ -182,11 +189,12 @@ export default function App() {
   useEffect(() => {
     // Load config from localStorage or fallback to defaults
     const savedCoordinators = localStorage.getItem('mic_coordinators');
-    if (savedCoordinators) {
+    if (savedCoordinators && !savedCoordinators.includes('51280')) {
       setCoordinators(JSON.parse(savedCoordinators));
     } else {
       const defaults = [
-        { empId: '51280', name: 'Dr. John Doe', department: 'SCOPE', signature: '/facsign.png' }
+        { empId: '50930', name: 'Dr Anusha K', department: 'SCOPE', signature: '' },
+        { empId: '51327', name: 'Dr Braveen M', department: 'SCOPE', signature: '' }
       ];
       setCoordinators(defaults);
       localStorage.setItem('mic_coordinators', JSON.stringify(defaults));
@@ -301,7 +309,7 @@ export default function App() {
   // Auth Action
   const handleLogin = (e) => {
     e.preventDefault();
-    if (currentPath === '/admin') {
+    if (currentPath === '/mic') {
       if (username === 'admin' && password === 'admin6767') {
         setUserRole('admin');
         sessionStorage.setItem('mic_user_role', 'admin');
@@ -312,18 +320,6 @@ export default function App() {
         showToast('Logged in as administrator');
       } else {
         showToast('Invalid administrator username or password');
-      }
-    } else {
-      if (username === 'user' && password === 'user123') {
-        setUserRole('user');
-        sessionStorage.setItem('mic_user_role', 'user');
-        sessionStorage.setItem('mic_username', 'user');
-        setView('landing');
-        setUsername('');
-        setPassword('');
-        showToast('Logged in as club coordinator');
-      } else {
-        showToast('Invalid coordinator username or password');
       }
     }
   };
@@ -819,9 +815,8 @@ ${formData.description}`;
         <table>
           <tr class="header-row">
             <th width="8%">Sl. No.</th>
-            <th width="25%">Reg. No. / Emp. ID.</th>
+            <th width="30%">Reg. No. / Emp. ID.</th>
             <th>Name</th>
-            <th width="15%">Signature</th>
             <th width="15%">Type</th>
           </tr>
           ${formData.attendanceData.map((p, idx) => `
@@ -829,7 +824,6 @@ ${formData.description}`;
               <td>${idx + 1}</td>
               <td>${escapeHtml(p.regNo || '')}</td>
               <td>${escapeHtml(p.name || '')}</td>
-              <td></td>
               <td>${p.type === 'Student' ? 'S' : p.type === 'Faculty' ? 'F' : p.type === 'External' ? 'E' : ''}</td>
             </tr>
           `).join('')}
@@ -995,46 +989,48 @@ ${formData.description}`;
 
   const mainContent = (
     <div className="app-container">
-      {/* Top navbar (if logged in) */}
-      {userRole !== null && (
-        <nav className="top-nav">
-          <div className="top-nav-logo">
-            <FileText size={18} className="text-muted" />
-            <span>MIC Event Report Generator</span>
-            {userRole === 'admin' && <span className="badge badge-info" style={{ marginLeft: 8 }}>Admin Workspace</span>}
+      {/* Top navbar */}
+      <nav className="top-nav">
+        <div className="top-nav-logo">
+          <FileText size={18} className="text-muted" />
+          <span>Eventra</span>
+          {userRole === 'admin' && <span className="badge badge-info" style={{ marginLeft: 8 }}>Admin Workspace</span>}
+        </div>
+        <div className="top-nav-actions">
+          {/* Theme picker */}
+          <div className="accent-picker">
+            {accentColors.map(color => (
+              <div 
+                key={color.name}
+                className={`accent-dot ${accent.name === color.name ? 'active' : ''}`}
+                style={{ backgroundColor: `hsl(${color.h}, ${color.s}%, ${color.l}%)` }}
+                onClick={() => setAccent(color)}
+              />
+            ))}
           </div>
-          <div className="top-nav-actions">
-            {/* Theme picker */}
-            <div className="accent-picker">
-              {accentColors.map(color => (
-                <div 
-                  key={color.name}
-                  className={`accent-dot ${accent.name === color.name ? 'active' : ''}`}
-                  style={{ backgroundColor: `hsl(${color.h}, ${color.s}%, ${color.l}%)` }}
-                  onClick={() => setAccent(color)}
-                />
-              ))}
-            </div>
-            
-            {userRole === 'admin' ? (
-              <>
-                <button className="btn btn-secondary" onClick={() => navigate(currentPath === '/admin' ? '/user' : '/admin')}>
-                  {currentPath === '/admin' ? 'Coordinators View' : 'Admin Panel'}
-                </button>
-                <button className="btn btn-link" onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <LogOut size={16} />
-                  <span>Logout</span>
-                </button>
-              </>
-            ) : (
+
+          {/* Theme Mode Toggle */}
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            style={{ display: 'flex', alignItems: 'center', padding: '6px 12px', fontSize: 13, cursor: 'pointer' }}
+          >
+            <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
+          </button>
+          
+          {userRole === 'admin' && (
+            <>
+              <button className="btn btn-secondary" onClick={() => navigate(currentPath === '/mic' ? '/user' : '/mic')}>
+                {currentPath === '/mic' ? 'Coordinators View' : 'Admin Panel'}
+              </button>
               <button className="btn btn-link" onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <LogOut size={16} />
                 <span>Logout</span>
               </button>
-            )}
-          </div>
-        </nav>
-      )}
+            </>
+          )}
+        </div>
+      </nav>
 
       {/* Main layout */}
       <main className="main-content">
@@ -1046,36 +1042,15 @@ ${formData.description}`;
                 <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
                 <span className="landing-mic-tag">Microsoft Innovations Club</span>
               </div>
-              <h1 className="landing-hero-title">Report Mode<br/>for <span>MIC.</span></h1>
+              <h1 className="landing-hero-title">Event Report<br/>Compiler for <span>MIC.</span></h1>
               <p className="landing-hero-subtitle">
-                An elegant, automated workspace to format and compile official event reports in VIT Chennai template. Access your workspace below.
+                Eventra compiles event metadata, coordinator mappings, attendance logs, and financial records into standardized, pre-formatted VIT Chennai event reports. Generate compliant Word documents ready for club submission.
               </p>
-              <div className="portal-cards-grid">
-                <div className="portal-card" onClick={() => navigate('/user')}>
-                  <div className="portal-card-icon">
-                    <Users size={20} />
-                  </div>
-                  <div className="portal-card-info">
-                    <span className="portal-card-title">
-                      Coordinator Workspace
-                      <ArrowRight size={14} className="portal-card-arrow" />
-                    </span>
-                    <span className="portal-card-desc">Start new reports, map attendance, and refine outcomes.</span>
-                  </div>
-                </div>
-                
-                <div className="portal-card" onClick={() => navigate('/admin')}>
-                  <div className="portal-card-icon">
-                    <Settings size={20} />
-                  </div>
-                  <div className="portal-card-info">
-                    <span className="portal-card-title">
-                      Administrator Access
-                      <ArrowRight size={14} className="portal-card-arrow" />
-                    </span>
-                    <span className="portal-card-desc">Configure settings, manage coordinators, and review uploads.</span>
-                  </div>
-                </div>
+              <div className="landing-hero-actions" style={{ marginTop: 12 }}>
+                <button className="btn btn-primary" onClick={() => navigate('/user')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 28px', fontSize: 16, cursor: 'pointer' }}>
+                  <span>Launch Workspace</span>
+                  <ArrowRight size={18} />
+                </button>
               </div>
             </div>
             <div className="landing-right">
@@ -1146,8 +1121,8 @@ ${formData.description}`;
           </div>
         )}
 
-        {/* VIEW: ADMIN LOGIN (Path /admin, if not admin) */}
-        {currentPath === '/admin' && userRole !== 'admin' && (
+        {/* VIEW: ADMIN LOGIN (Path /mic, if not admin) */}
+        {currentPath === '/mic' && userRole !== 'admin' && (
           <div className="login-card">
             <div className="landing-illustration">
               <FileText size={32} style={{ color: 'var(--accent)' }} />
@@ -1183,54 +1158,17 @@ ${formData.description}`;
           </div>
         )}
 
-        {/* VIEW: USER LOGIN (Path /user, if not logged in) */}
-        {currentPath === '/user' && userRole !== 'user' && userRole !== 'admin' && (
-          <div className="login-card">
-            <div className="landing-illustration">
-              <FileText size={32} style={{ color: 'var(--accent)' }} />
-            </div>
-            <h2 className="login-title">MIC Coordinator Access</h2>
-            <form onSubmit={handleLogin}>
-              <div className="form-group">
-                <label className="form-label">Username</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="e.g. johndoe"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Password</label>
-                <input 
-                  type="password" 
-                  className="form-input" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  required
-                />
-              </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }}>
-                Login to Workspace
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* VIEW: COORDINATOR WORKSPACE LANDING (Path /user, logged in, landing view) */}
-        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'landing' && (
+        {/* VIEW: COORDINATOR WORKSPACE LANDING (Path /user, landing view) */}
+        {currentPath === '/user' && view === 'landing' && (
           <div className="landing-split-container">
             <div className="landing-left">
               <div className="landing-mic-logo-row">
                 <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
                 <span className="landing-mic-tag">Microsoft Innovations Club</span>
               </div>
-              <h1 className="landing-hero-title">Report Mode for Creators</h1>
+              <h1 className="landing-hero-title">Report Workspace</h1>
               <p className="landing-hero-subtitle">
-                An elegant, Notion-style writer to format and compile official event reports in seconds. Built for MIC VIT Chennai.
+                Draft, edit, and compile official MIC VIT Chennai event reports. Select from pre-configured venues, input event details, map student attendance, and export your completed report.
               </p>
               <div className="landing-hero-actions">
                 <button className="btn btn-primary" onClick={() => setView('create')}>
@@ -1317,41 +1255,50 @@ ${formData.description}`;
         )}
 
         {/* VIEW: CREATE REPORT WIZARD */}
-        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'create' && (
+        {currentPath === '/user' && view === 'create' && (
           <div className="form-wizard">
             <div className="wizard-header">
               <span className="wizard-title">{formData.eventTitle || 'New Event Report'}</span>
-              <span className="wizard-progress">Step {step} of 7</span>
+              <span className="wizard-progress">Step {step} of 6</span>
             </div>
             
             <div className="wizard-body">
-              {/* Step 1: Event Details */}
+              {/* Step 1: Event Details & Faculty Coordinators */}
               {step === 1 && (
                 <div>
                   <h2 className="step-question">Tell us about the event</h2>
-                  <p className="step-description">Fill out the basic identifiers and dates for this report.</p>
+                  <p className="step-description">Fill out the basic identifiers, dates, and coordinator mappings for this report.</p>
                   
                   <div className="form-row">
                     <div className="form-group">
                       <label className="form-label">Event Type</label>
                       <select 
-                        className="form-input"
+                        className={`form-input ${validationErrors.eventType ? 'error' : ''}`}
                         value={formData.eventType}
-                        onChange={(e) => setFormData(prev => ({ ...prev, eventType: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, eventType: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, eventType: null }));
+                        }}
                       >
+                        <option value="">Select Event Type...</option>
                         {eventTypesList.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
+                      {validationErrors.eventType && <span className="validation-error-text">{validationErrors.eventType}</span>}
                     </div>
                     
                     <div className="form-group">
                       <label className="form-label">Event Title</label>
                       <input 
                         type="text" 
-                        className="form-input"
+                        className={`form-input ${validationErrors.eventTitle ? 'error' : ''}`}
                         placeholder="e.g. Android Development Workshop"
                         value={formData.eventTitle}
-                        onChange={(e) => setFormData(prev => ({ ...prev, eventTitle: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, eventTitle: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, eventTitle: null }));
+                        }}
                       />
+                      {validationErrors.eventTitle && <span className="validation-error-text">{validationErrors.eventTitle}</span>}
                     </div>
                   </div>
 
@@ -1360,20 +1307,28 @@ ${formData.description}`;
                       <label className="form-label">Start Date</label>
                       <input 
                         type="date" 
-                        className="form-input"
+                        className={`form-input ${validationErrors.startDate ? 'error' : ''}`}
                         value={formData.startDate}
-                        onChange={(e) => setFormData(prev => ({ ...prev, startDate: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, startDate: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, startDate: null }));
+                        }}
                       />
+                      {validationErrors.startDate && <span className="validation-error-text">{validationErrors.startDate}</span>}
                     </div>
                     
                     <div className="form-group">
                       <label className="form-label">End Date</label>
                       <input 
                         type="date" 
-                        className="form-input"
+                        className={`form-input ${validationErrors.endDate ? 'error' : ''}`}
                         value={formData.endDate}
-                        onChange={(e) => setFormData(prev => ({ ...prev, endDate: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, endDate: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, endDate: null }));
+                        }}
                       />
+                      {validationErrors.endDate && <span className="validation-error-text">{validationErrors.endDate}</span>}
                     </div>
                   </div>
 
@@ -1382,22 +1337,30 @@ ${formData.description}`;
                       <label className="form-label">Start Time</label>
                       <input 
                         type="text" 
-                        className="form-input"
+                        className={`form-input ${validationErrors.startTime ? 'error' : ''}`}
                         placeholder="e.g. 10:00 AM"
                         value={formData.startTime}
-                        onChange={(e) => setFormData(prev => ({ ...prev, startTime: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, startTime: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, startTime: null }));
+                        }}
                       />
+                      {validationErrors.startTime && <span className="validation-error-text">{validationErrors.startTime}</span>}
                     </div>
                     
                     <div className="form-group">
                       <label className="form-label">Duration</label>
                       <input 
                         type="text" 
-                        className="form-input"
+                        className={`form-input ${validationErrors.duration ? 'error' : ''}`}
                         placeholder="e.g. 90 minutes, 3 hours"
                         value={formData.duration}
-                        onChange={(e) => setFormData(prev => ({ ...prev, duration: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, duration: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, duration: null }));
+                        }}
                       />
+                      {validationErrors.duration && <span className="validation-error-text">{validationErrors.duration}</span>}
                     </div>
                   </div>
 
@@ -1405,12 +1368,17 @@ ${formData.description}`;
                     <div className="form-group">
                       <label className="form-label">Venue</label>
                       <select 
-                        className="form-input"
+                        className={`form-input ${validationErrors.venue ? 'error' : ''}`}
                         value={formData.venue}
-                        onChange={(e) => setFormData(prev => ({ ...prev, venue: e.target.value }))}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, venue: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, venue: null }));
+                        }}
                       >
+                        <option value="">Select Venue...</option>
                         {venuesList.map(v => <option key={v} value={v}>{v}</option>)}
                       </select>
+                      {validationErrors.venue && <span className="validation-error-text">{validationErrors.venue}</span>}
                     </div>
 
                     {(formData.venue === 'Classroom' || formData.venue === 'Other') && (
@@ -1418,55 +1386,57 @@ ${formData.description}`;
                         <label className="form-label">Custom Venue Name</label>
                         <input 
                           type="text" 
-                          className="form-input"
+                          className={`form-input ${validationErrors.customVenue ? 'error' : ''}`}
                           placeholder="e.g. Netaji block 402"
                           value={formData.customVenue}
-                          onChange={(e) => setFormData(prev => ({ ...prev, customVenue: e.target.value }))}
+                          onChange={(e) => {
+                            setFormData(prev => ({ ...prev, customVenue: e.target.value }));
+                            setValidationErrors(prev => ({ ...prev, customVenue: null }));
+                          }}
                         />
+                        {validationErrors.customVenue && <span className="validation-error-text">{validationErrors.customVenue}</span>}
                       </div>
                     )}
                   </div>
+
+                  <div className="form-row" style={{ borderTop: '1px solid var(--border-light)', paddingTop: 20, marginTop: 20 }}>
+                    <div className="form-group">
+                      <label className="form-label">Faculty Coordinator 1</label>
+                      <select 
+                        className={`form-input ${validationErrors.coord1 ? 'error' : ''}`}
+                        value={formData.coord1}
+                        onChange={(e) => {
+                          setFormData(prev => ({ ...prev, coord1: e.target.value }));
+                          setValidationErrors(prev => ({ ...prev, coord1: null }));
+                        }}
+                      >
+                        <option value="">Select Faculty...</option>
+                        {coordinatorsList.map(c => (
+                          <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
+                        ))}
+                      </select>
+                      {validationErrors.coord1 && <span className="validation-error-text">{validationErrors.coord1}</span>}
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Faculty Coordinator 2 (Optional)</label>
+                      <select 
+                        className="form-input"
+                        value={formData.coord2}
+                        onChange={(e) => setFormData(prev => ({ ...prev, coord2: e.target.value }))}
+                      >
+                        <option value="">Select Faculty...</option>
+                        {coordinatorsList.map(c => (
+                          <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
               )}
 
-              {/* Step 2: Faculty Coordinators */}
+              {/* Step 2: Resource Person */}
               {step === 2 && (
-                <div>
-                  <h2 className="step-question">Who were the coordinators?</h2>
-                  <p className="step-description">Select up to two faculty coordinators for this event.</p>
-                  
-                  <div className="form-group" style={{ marginBottom: 24 }}>
-                    <label className="form-label">Faculty Coordinator 1</label>
-                    <select 
-                      className="form-input"
-                      value={formData.coord1}
-                      onChange={(e) => setFormData(prev => ({ ...prev, coord1: e.target.value }))}
-                    >
-                      <option value="">Select Faculty...</option>
-                      {coordinatorsList.map(c => (
-                        <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Faculty Coordinator 2 (Optional)</label>
-                    <select 
-                      className="form-input"
-                      value={formData.coord2}
-                      onChange={(e) => setFormData(prev => ({ ...prev, coord2: e.target.value }))}
-                    >
-                      <option value="">Select Faculty...</option>
-                      {coordinatorsList.map(c => (
-                        <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 3: Resource Person */}
-              {step === 3 && (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                     <div>
@@ -1573,8 +1543,8 @@ ${formData.description}`;
                 </div>
               )}
 
-              {/* Step 4: Event Report & Refinement */}
-              {step === 4 && (
+              {/* Step 3: Event Report & Refinement */}
+              {step === 3 && (
                 <div>
                   <h2 className="step-question">Write the event report</h2>
                   <p className="step-description">Paste the summary, details, and outcomes of the event (200-500 words).</p>
@@ -1607,8 +1577,8 @@ ${formData.description}`;
                 </div>
               )}
 
-              {/* Step 5: Attendance CSV Upload */}
-              {step === 5 && (
+              {/* Step 4: Attendance CSV Upload */}
+              {step === 4 && (
                 <div>
                   <h2 className="step-question">Upload participant attendance</h2>
                   <p className="step-description">Provide a CSV file of participant attendance. Columns will be auto-mapped.</p>
@@ -1643,8 +1613,8 @@ ${formData.description}`;
                 </div>
               )}
 
-              {/* Step 6: Brochure & Images */}
-              {step === 6 && (
+              {/* Step 5: Brochure & Images */}
+              {step === 5 && (
                 <div>
                   <h2 className="step-question">Add event media</h2>
                   <p className="step-description">Upload the flyer/brochure and at least two photos of the event.</p>
@@ -1701,8 +1671,8 @@ ${formData.description}`;
                 </div>
               )}
 
-              {/* Step 7: Finance Section */}
-              {step === 7 && (
+              {/* Step 6: Finance Section */}
+              {step === 6 && (
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                     <div>
@@ -1781,14 +1751,36 @@ ${formData.description}`;
               <button 
                 className="btn btn-primary" 
                 onClick={() => {
-                  if (step === 7) {
+                  if (step === 1) {
+                    const errors = {};
+                    if (!formData.eventType) errors.eventType = 'Event Type is required';
+                    if (!formData.eventTitle.trim()) errors.eventTitle = 'Event Title is required';
+                    if (!formData.startDate) errors.startDate = 'Start Date is required';
+                    if (!formData.endDate) errors.endDate = 'End Date is required';
+                    if (!formData.startTime.trim()) errors.startTime = 'Start Time is required';
+                    if (!formData.duration.trim()) errors.duration = 'Duration is required';
+                    if (!formData.venue) errors.venue = 'Venue is required';
+                    if ((formData.venue === 'Classroom' || formData.venue === 'Other') && !formData.customVenue.trim()) {
+                      errors.customVenue = 'Custom Venue Name is required';
+                    }
+                    if (!formData.coord1) errors.coord1 = 'Faculty Coordinator is required';
+
+                    if (Object.keys(errors).length > 0) {
+                      setValidationErrors(errors);
+                      showToast('Please fill all required fields');
+                      return;
+                    }
+                    setValidationErrors({});
+                  }
+
+                  if (step === 6) {
                     setView('review');
                   } else {
                     setStep(step + 1);
                   }
                 }}
               >
-                <span>{step === 7 ? 'Review Summary' : 'Next'}</span>
+                <span>{step === 6 ? 'Review Summary' : 'Next'}</span>
                 <ArrowRight size={16} />
               </button>
             </div>
@@ -1796,7 +1788,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: REVIEW & EDIT */}
-        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'review' && (
+        {currentPath === '/user' && view === 'review' && (
           <div className="review-container">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <h2>Review Event Details</h2>
@@ -1854,7 +1846,7 @@ ${formData.description}`;
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
                   <span>2. Coordinators</span>
                 </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(2); }}>
+                <button className="btn btn-link" onClick={() => { setView('create'); setStep(1); }}>
                   Edit
                 </button>
               </div>
@@ -1881,7 +1873,7 @@ ${formData.description}`;
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
                   <span>3. Guest / Resource Person</span>
                 </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(3); }}>
+                <button className="btn btn-link" onClick={() => { setView('create'); setStep(2); }}>
                   Edit
                 </button>
               </div>
@@ -1912,7 +1904,7 @@ ${formData.description}`;
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
                   <span>4. Report Text Outcomes</span>
                 </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(4); }}>
+                <button className="btn btn-link" onClick={() => { setView('create'); setStep(3); }}>
                   Edit
                 </button>
               </div>
@@ -1928,7 +1920,7 @@ ${formData.description}`;
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
                   <span>5. Attendance & CSV Upload</span>
                 </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(5); }}>
+                <button className="btn btn-link" onClick={() => { setView('create'); setStep(4); }}>
                   Edit
                 </button>
               </div>
@@ -1951,7 +1943,7 @@ ${formData.description}`;
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
                   <span>6. Uploaded Media & Brochure</span>
                 </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(6); }}>
+                <button className="btn btn-link" onClick={() => { setView('create'); setStep(5); }}>
                   Edit
                 </button>
               </div>
@@ -1974,7 +1966,7 @@ ${formData.description}`;
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
                   <span>7. Finance Details</span>
                 </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(7); }}>
+                <button className="btn btn-link" onClick={() => { setView('create'); setStep(6); }}>
                   Edit
                 </button>
               </div>
@@ -2001,7 +1993,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: DOCUMENT PREVIEW */}
-        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'preview' && (
+        {currentPath === '/user' && view === 'preview' && (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div className="preview-nav">
               <button className="btn btn-secondary" onClick={() => setView('review')} style={{ gap: 6 }}>
@@ -2152,9 +2144,8 @@ ${formData.description}`;
                   <thead>
                     <tr style={{ backgroundColor: '#f2f2f2', fontWeight: 'bold' }}>
                       <th style={{ width: '8%' }}>Sl. No.</th>
-                      <th style={{ width: '25%' }}>Reg. No. / Emp. ID.</th>
+                      <th style={{ width: '30%' }}>Reg. No. / Emp. ID.</th>
                       <th>Name</th>
-                      <th style={{ width: '15%' }}>Signature</th>
                       <th style={{ width: '15%' }}>Type</th>
                     </tr>
                   </thead>
@@ -2164,7 +2155,6 @@ ${formData.description}`;
                         <td>{idx + 1}</td>
                         <td>{p.regNo}</td>
                         <td>{p.name}</td>
-                        <td></td>
                         <td>{p.type === 'Student' ? 'S' : p.type === 'Faculty' ? 'F' : p.type === 'External' ? 'E' : ''}</td>
                       </tr>
                     ))}
@@ -2219,7 +2209,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: ADMIN INTERFACE */}
-        {currentPath === '/admin' && userRole === 'admin' && (
+        {currentPath === '/mic' && userRole === 'admin' && (
           <div className="admin-layout">
             <aside className="admin-sidebar">
               <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.2 }}>MIC Administration</h2>
