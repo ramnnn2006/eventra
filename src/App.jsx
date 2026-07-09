@@ -938,25 +938,96 @@ ${formData.description}`;
 
         {/* VIEW: LANDING */}
         {view === 'landing' && (
-          <div className="landing-page">
-            <div className="landing-illustration">
-              <FileText size={32} style={{ color: 'var(--accent)' }} />
+          <div className="landing-split-container">
+            <div className="landing-left">
+              <div className="landing-mic-logo-row">
+                <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
+                <span className="landing-mic-tag">Microsoft Innovations Club</span>
+              </div>
+              <h1 className="landing-hero-title">Report Mode for Creators</h1>
+              <p className="landing-hero-subtitle">
+                An elegant, Notion-style writer to format and compile official event reports in seconds. Built for MIC VIT Chennai.
+              </p>
+              <div className="landing-hero-actions">
+                <button className="btn btn-primary" onClick={() => setView('create')}>
+                  Start New Report
+                </button>
+                <button className="btn btn-secondary" onClick={() => docxInputRef.current?.click()}>
+                  Upload Completed Report
+                </button>
+                <input 
+                  type="file" 
+                  ref={docxInputRef} 
+                  onChange={handleCompletedReportUpload} 
+                  accept=".docx" 
+                  style={{ display: 'none' }}
+                />
+              </div>
             </div>
-            <h1 className="landing-title">Event Report Generator</h1>
-            <div className="landing-actions">
-              <button className="btn btn-primary" onClick={() => setView('create')}>
-                Start New Report
-              </button>
-              <button className="btn btn-secondary" onClick={() => docxInputRef.current?.click()}>
-                Upload Completed Report
-              </button>
-              <input 
-                type="file" 
-                ref={docxInputRef} 
-                onChange={handleCompletedReportUpload} 
-                accept=".docx" 
-                style={{ display: 'none' }}
-              />
+            <div className="landing-right">
+              <div className="mic-silhouette-container">
+                <svg viewBox="0 0 400 400" className="mic-silhouette-svg">
+                  {/* Top Left Quadrant (dots) */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`tl-${r}-${c}`} 
+                        cx={50 + c * 16} 
+                        cy={50 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${(r + c) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+
+                  {/* Top Right Quadrant */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`tr-${r}-${c}`} 
+                        cx={210 + c * 16} 
+                        cy={50 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${(r + (7 - c)) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+
+                  {/* Bottom Left Quadrant */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`bl-${r}-${c}`} 
+                        cx={50 + c * 16} 
+                        cy={210 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${((7 - r) + c) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+
+                  {/* Bottom Right Quadrant */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`br-${r}-${c}`} 
+                        cx={210 + c * 16} 
+                        cy={210 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${((7 - r) + (7 - c)) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+                </svg>
+              </div>
             </div>
           </div>
         )}
