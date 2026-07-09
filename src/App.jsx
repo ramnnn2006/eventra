@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   FileText, Upload, ArrowRight, ArrowLeft, Check, Edit, Settings, LogOut, 
   Users, CheckCircle, Plus, Trash, MapPin, Calendar, Clock, DollarSign, 
-  RefreshCw, AlertCircle, Eye, Download, Info
+  RefreshCw, AlertCircle, Eye, Download, Info, Sparkles, Mic
 } from 'lucide-react';
 import Papa from 'papaparse';
 import PizZip from 'pizzip';
@@ -130,8 +130,8 @@ export default function App() {
     endTime: '',
     venue: 'MG Auditorium',
     customVenue: '',
-    coord1: '',
-    coord2: '',
+    coord1: '50930',
+    coord2: '51327',
     resourcePersonEnabled: false,
     resourcePerson: {
       name: '',
@@ -160,6 +160,18 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [showRefineModal, setShowRefineModal] = useState(false);
   const [refinedText, setRefinedText] = useState('');
+
+  // Smart Fill state
+  const [smartFillOpen, setSmartFillOpen] = useState(false);
+  const [smartFillMode, setSmartFillMode] = useState('text'); // 'text' or 'voice'
+  const [smartFillInput, setSmartFillInput] = useState('');
+  const [smartFillLoading, setSmartFillLoading] = useState(false);
+  const [smartFillFlags, setSmartFillFlags] = useState([]); // fields that couldn't be extracted
+  const [isListening, setIsListening] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [smartFillActiveField, setSmartFillActiveField] = useState(null); // field being prompted for
+  const [smartFillAwaitingVoiceAnswer, setSmartFillAwaitingVoiceAnswer] = useState(false);
+  const [voiceSpeakPrompt, setVoiceSpeakPrompt] = useState('');
   
   // Admin editing states
   const [adminSection, setAdminSection] = useState('reports'); // reports, faculty, config, template
@@ -175,6 +187,7 @@ export default function App() {
   const docxInputRef = useRef(null);
   const facSigInputRef = useRef(null);
   const templateInputRef = useRef(null);
+  const recognitionRef = useRef(null);
 
   // Available accent colors
   const accentColors = [
@@ -189,16 +202,25 @@ export default function App() {
   useEffect(() => {
     // Load config from localStorage or fallback to defaults
     const savedCoordinators = localStorage.getItem('mic_coordinators');
-    if (savedCoordinators && !savedCoordinators.includes('51280')) {
-      setCoordinators(JSON.parse(savedCoordinators));
-    } else {
-      const defaults = [
-        { empId: '50930', name: 'Dr Anusha K', department: 'SCOPE', signature: '' },
-        { empId: '51327', name: 'Dr Braveen M', department: 'SCOPE', signature: '' }
-      ];
-      setCoordinators(defaults);
-      localStorage.setItem('mic_coordinators', JSON.stringify(defaults));
+    let coords = [];
+    if (savedCoordinators) {
+      try {
+        coords = JSON.parse(savedCoordinators);
+      } catch (e) {
+        coords = [];
+      }
     }
+    const defaultCoords = [
+      { empId: '50930', name: 'Dr Anusha K', department: 'SCOPE', signature: '' },
+      { empId: '51327', name: 'Dr Braveen M', department: 'SCOPE', signature: '' }
+    ];
+    defaultCoords.forEach(def => {
+      if (!coords.some(c => c.empId === def.empId)) {
+        coords.push(def);
+      }
+    });
+    setCoordinators(coords);
+    localStorage.setItem('mic_coordinators', JSON.stringify(coords));
 
     const savedVenues = localStorage.getItem('mic_venues');
     if (savedVenues) {
@@ -446,7 +468,7 @@ export default function App() {
 
           setFormData(prev => ({ ...prev, attendanceData: mapped }));
           setCsvErrors([]);
-          showToast(`Successfully parsed ${mapped.length} attendees`);
+          showToast(`${mapped.length} attendees loaded`);
         } else {
           setCsvErrors(['Could not auto-map columns. Please check your CSV column headers. Make sure there are columns like "Name" and "Registration Number".']);
         }
@@ -466,11 +488,11 @@ export default function App() {
     
     setRefinementLoading(true);
     try {
-      const prompt = `Refine the following event report to improve grammar, readability, and formatting. 
+      const prompt = `Clean up this event report. Fix grammar and make it read better.
 - Keep all facts, numbers, dates, names, and key outcomes.
-- Write naturally like a human. Avoid AI-sounding buzzwords, excessive decorations, or robotic summaries.
+- Write like a normal person. No fancy words, no corporate speak, no filler.
 - Keep the length between 200 and 500 words.
-- Do NOT output any headings, introductions, markdown tags, or notes. Just output the clean refined text paragraphs.
+- Don't add headings, intros, markdown, or extra notes. Just give back the cleaned-up text.
 
 Report:
 ${formData.description}`;
@@ -498,9 +520,9 @@ ${formData.description}`;
       setShowRefineModal(true);
     } catch (e) {
       console.error(e);
-      showToast('Refinement failed. Using local fallback.');
+      showToast('Couldn\'t reach Groq. Text left as-is.');
       // Local fallback simple polishing
-      setRefinedText(formData.description + "\n\n(Polished content summary here)");
+      setRefinedText(formData.description + "\n\n(Could not refine. Text unchanged.)");
       setShowRefineModal(true);
     } finally {
       setRefinementLoading(false);
@@ -511,7 +533,343 @@ ${formData.description}`;
   const applyRefinedText = () => {
     setFormData(prev => ({ ...prev, description: refinedText }));
     setShowRefineModal(false);
-    showToast('Refined text applied to report');
+    showToast('Write-up updated.');
+  };
+
+  // Text-To-Speech helper
+  const speakOutLoud = (text) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-IN';
+      window.speechSynthesis.speak(utterance);
+      setVoiceSpeakPrompt(text);
+    }
+  };
+
+  const getMissingMandatoryFields = (data) => {
+    const missing = [];
+    if (!data.eventType) missing.push('eventType');
+    if (!data.eventTitle || !data.eventTitle.trim()) missing.push('eventTitle');
+    if (!data.startDate) missing.push('startDate');
+    if (!data.endDate) missing.push('endDate');
+    if (!data.startTime || !data.startTime.trim()) missing.push('startTime');
+    if (!data.duration || !data.duration.trim()) missing.push('duration');
+    if (!data.venue) missing.push('venue');
+    if ((data.venue === 'Classroom' || data.venue === 'Other') && (!data.customVenue || !data.customVenue.trim())) {
+      missing.push('customVenue');
+    }
+    if (!data.coord1) missing.push('coord1');
+    return missing;
+  };
+
+  const fieldQuestions = {
+    eventType: "What is the event type? Is it a workshop, hackathon, guest lecture, or something else?",
+    eventTitle: "What is the title of the event?",
+    startDate: "What is the start date of the event?",
+    endDate: "What is the end date of the event?",
+    startTime: "What time does the event start?",
+    duration: "What is the duration of the event?",
+    venue: "What is the venue? For example, M G Auditorium, Netaji Auditorium, Classroom, or Online?",
+    customVenue: "Please specify the custom venue name.",
+    coord1: "Who is the primary faculty coordinator?"
+  };
+
+  // Smart Fill - parse natural language into form fields via Groq
+  const handleSmartFill = async (text, isVoiceFlow = false) => {
+    if (!text.trim()) return;
+    setSmartFillLoading(true);
+    try {
+      const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const prompt = `You are a form parser for a college event report tool. Today's date is ${todayStr}.
+
+Extract structured data from the user's description. Return ONLY valid JSON, no markdown, no explanation.
+
+Available event types: ${eventTypesList.join(', ')}
+Available venues: ${venuesList.join(', ')}
+
+JSON schema:
+{
+  "eventType": "one of the available types or empty string",
+  "eventTitle": "string or empty",
+  "startDate": "YYYY-MM-DD or empty",
+  "endDate": "YYYY-MM-DD or empty",
+  "startTime": "h:mm AM/PM or empty",
+  "duration": "e.g. 2 hours, 90 mins, or empty",
+  "venue": "one of the available venues or empty",
+  "customVenue": "if venue is Classroom or Other, the name, else empty",
+  "description": "event summary text or empty",
+  "resourcePersonEnabled": true/false,
+  "resourcePerson": {
+    "name": "", "designation": "", "organization": "", "place": "", "email": "", "mobile": ""
+  },
+  "unfilled": ["list of field names that could not be determined"]
+}
+
+Rules:
+- If a date is relative (like "30th this month", "last Tuesday") resolve it using today's date.
+- If a date is impossible (like "38th June") put it in unfilled and leave the field empty.
+- If you cannot determine a field, leave it as empty string and add it to unfilled.
+- Never guess. Only extract what is clearly stated or implied.
+
+User input:
+${text}`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer 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'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.3
+        })
+      });
+
+      if (!response.ok) throw new Error('API request failed');
+
+      const data = await response.json();
+      const raw = data.choices[0].message.content.trim();
+
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        showToast("Couldn't parse that. Try being more specific.");
+        return;
+      }
+
+      const flags = parsed.unfilled || [];
+      setSmartFillFlags(flags);
+
+      let updatedData;
+      setFormData(prev => {
+        const updated = { ...prev };
+        if (parsed.eventType) updated.eventType = parsed.eventType;
+        if (parsed.eventTitle) updated.eventTitle = parsed.eventTitle;
+        if (parsed.startDate) updated.startDate = parsed.startDate;
+        if (parsed.endDate) updated.endDate = parsed.endDate;
+        if (parsed.startTime) updated.startTime = parsed.startTime;
+        if (parsed.duration) updated.duration = parsed.duration;
+        if (parsed.venue) updated.venue = parsed.venue;
+        if (parsed.customVenue) updated.customVenue = parsed.customVenue;
+        if (parsed.description) updated.description = parsed.description;
+        if (parsed.resourcePersonEnabled !== undefined) updated.resourcePersonEnabled = parsed.resourcePersonEnabled;
+        if (parsed.resourcePerson) {
+          const rp = { ...updated.resourcePerson };
+          if (parsed.resourcePerson.name) rp.name = parsed.resourcePerson.name;
+          if (parsed.resourcePerson.designation) rp.designation = parsed.resourcePerson.designation;
+          if (parsed.resourcePerson.organization) rp.organization = parsed.resourcePerson.organization;
+          if (parsed.resourcePerson.place) rp.place = parsed.resourcePerson.place;
+          if (parsed.resourcePerson.email) rp.email = parsed.resourcePerson.email;
+          if (parsed.resourcePerson.mobile) rp.mobile = parsed.resourcePerson.mobile;
+          updated.resourcePerson = rp;
+        }
+        updatedData = updated;
+        return updated;
+      });
+
+      if (isVoiceFlow) {
+        stopListening();
+        const missing = getMissingMandatoryFields(updatedData);
+        if (missing.length > 0) {
+          setSmartFillAwaitingVoiceAnswer(true);
+          setSmartFillActiveField(missing[0]);
+          const qText = fieldQuestions[missing[0]];
+          speakOutLoud(qText);
+          setVoiceTranscript('');
+          setTimeout(() => {
+            startListening();
+          }, 1000);
+        } else {
+          setView('create');
+          setStep(1);
+          setSmartFillOpen(false);
+          setSmartFillInput('');
+          setVoiceTranscript('');
+          speakOutLoud("All mandatory fields are filled. Redirecting to review.");
+          showToast('Smart Fill done. All fields filled.');
+        }
+      } else {
+        setView('create');
+        setStep(1);
+        setSmartFillOpen(false);
+        setSmartFillInput('');
+        setVoiceTranscript('');
+        if (flags.length > 0) {
+          showToast(`Smart Fill done. ${flags.length} fields need your attention.`);
+        } else {
+          showToast('Smart Fill done. All fields filled.');
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Couldn't reach Groq. Try again.");
+    } finally {
+      setSmartFillLoading(false);
+    }
+  };
+
+  // Parse voice answer for a single prompt field
+  const handleSmartFillAnswer = async (answerText) => {
+    if (!answerText.trim() || !smartFillActiveField) return;
+    setSmartFillLoading(true);
+    stopListening();
+    try {
+      const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      let fieldHint = '';
+      if (smartFillActiveField === 'eventType') fieldHint = `Available types: ${eventTypesList.join(', ')}.`;
+      if (smartFillActiveField === 'venue') fieldHint = `Available venues: ${venuesList.join(', ')}.`;
+
+      const prompt = `You are a helper parsing a single field "${smartFillActiveField}" from user voice input.
+Today's date is ${todayStr}.
+${fieldHint}
+
+User spoke: "${answerText}"
+
+Extract the value for "${smartFillActiveField}" based on their speech.
+Rules:
+- For date fields, output in YYYY-MM-DD format. If relative, resolve using today's date. If impossible, leave empty.
+- For all other fields, output the clean extracted value (e.g. if eventType, output one of the available types. If venue, output one of the available venues).
+- Return ONLY a JSON object: {"value": "extracted_value_here", "unfilled": true/false} (unfilled should be true if it cannot be determined). Do not return any other text.`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer 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'
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) throw new Error('API request failed');
+
+      const data = await response.json();
+      const raw = data.choices[0].message.content.trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        showToast("Couldn't parse that. Please speak clearly.");
+        return;
+      }
+
+      let updatedData;
+      setFormData(prev => {
+        const nextData = { ...prev };
+        if (parsed.unfilled) {
+          setSmartFillFlags(f => [...new Set([...f, smartFillActiveField])]);
+        } else {
+          nextData[smartFillActiveField] = parsed.value;
+          setSmartFillFlags(f => f.filter(x => x !== smartFillActiveField));
+        }
+        updatedData = nextData;
+        return nextData;
+      });
+
+      const remaining = getMissingMandatoryFields(updatedData);
+      if (remaining.length > 0) {
+        const nextF = remaining[0];
+        setSmartFillActiveField(nextF);
+        const qText = fieldQuestions[nextF];
+        speakOutLoud(qText);
+        setVoiceTranscript('');
+        setTimeout(() => {
+          startListening();
+        }, 1000);
+      } else {
+        setSmartFillActiveField(null);
+        setSmartFillAwaitingVoiceAnswer(false);
+        setSmartFillOpen(false);
+        setVoiceTranscript('');
+        setView('create');
+        setStep(1);
+        speakOutLoud("All mandatory fields are filled. Let's review the report.");
+        showToast('Smart Fill voice flow complete!');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Error processing voice answer.");
+    } finally {
+      setSmartFillLoading(false);
+    }
+  };
+
+  const finishVoiceFlowManually = () => {
+    stopListening();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    const remaining = getMissingMandatoryFields(formData);
+    setSmartFillFlags(prev => [...new Set([...prev, ...remaining])]);
+    setSmartFillActiveField(null);
+    setSmartFillAwaitingVoiceAnswer(false);
+    setSmartFillOpen(false);
+    setVoiceTranscript('');
+    setView('create');
+    setStep(1);
+    showToast('Voice flow ended. Please review the form.');
+  };
+
+  // Voice recognition - start listening
+  const startListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition not supported in this browser.');
+      return;
+    }
+    setVoiceTranscript('');
+    setIsListening(true);
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-IN';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognitionRef.current = recognition;
+
+    let finalTranscript = '';
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript + ' ';
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      setVoiceTranscript(finalTranscript + interim);
+    };
+
+    recognition.onend = () => {
+      // Auto-restart if still listening
+      if (recognitionRef.current && isListening) {
+        try { recognition.start(); } catch {}
+      }
+    };
+
+    recognition.onerror = (e) => {
+      console.error('Speech recognition error:', e.error);
+      if (e.error !== 'no-speech') {
+        setIsListening(false);
+      }
+    };
+
+    recognition.start();
+  };
+
+  // Voice recognition - stop listening
+  const stopListening = () => {
+    setIsListening(false);
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
   };
 
   // Direct completed report upload
@@ -563,8 +921,8 @@ ${formData.description}`;
         endTime: '',
         venue: 'MG Auditorium',
         customVenue: '',
-        coord1: '',
-        coord2: '',
+        coord1: '50930',
+        coord2: '51327',
         resourcePersonEnabled: false,
         resourcePerson: { name: '', designation: '', organization: '', place: '', email: '', mobile: '' },
         description: '',
@@ -660,7 +1018,7 @@ ${formData.description}`;
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      showToast('DOCX report generated successfully!');
+      showToast('Report downloaded.');
     } catch (e) {
       console.error(e);
       showToast('DOCX generation error: ' + e.message);
@@ -875,7 +1233,7 @@ ${formData.description}`;
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showToast('Rich Word report (with images) downloaded!');
+    showToast('Full report with images downloaded.');
   };
 
   // Add faculty coordinator in admin panel
@@ -975,7 +1333,7 @@ ${formData.description}`;
   const handleTemplateUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      showToast('System template replaced locally (Simulated)');
+      showToast('Template file replaced.');
       if (templateInputRef.current) templateInputRef.current.value = '';
     }
   };
@@ -1042,13 +1400,13 @@ ${formData.description}`;
                 <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
                 <span className="landing-mic-tag">Microsoft Innovations Club</span>
               </div>
-              <h1 className="landing-hero-title">Event Report<br/>Compiler for <span>MIC.</span></h1>
+              <h1 className="landing-hero-title">MIC Report<br/>Generator.</h1>
               <p className="landing-hero-subtitle">
-                Eventra compiles event metadata, coordinator mappings, attendance logs, and financial records into standardized, pre-formatted VIT Chennai event reports. Generate compliant Word documents ready for club submission.
+                Fill in your event details, upload attendance, and get a formatted VIT Chennai report as a Word doc. That's it.
               </p>
               <div className="landing-hero-actions" style={{ marginTop: 12 }}>
                 <button className="btn btn-primary" onClick={() => navigate('/user')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 28px', fontSize: 16, cursor: 'pointer' }}>
-                  <span>Launch Workspace</span>
+                  <span>Get Started</span>
                   <ArrowRight size={18} />
                 </button>
               </div>
@@ -1166,9 +1524,9 @@ ${formData.description}`;
                 <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
                 <span className="landing-mic-tag">Microsoft Innovations Club</span>
               </div>
-              <h1 className="landing-hero-title">Report Workspace</h1>
+              <h1 className="landing-hero-title">Your Reports</h1>
               <p className="landing-hero-subtitle">
-                Draft, edit, and compile official MIC VIT Chennai event reports. Select from pre-configured venues, input event details, map student attendance, and export your completed report.
+                Start a new report or pick up where you left off. You can also upload a finished .docx if you just need it saved.
               </p>
               <div className="landing-hero-actions">
                 <button className="btn btn-primary" onClick={() => setView('create')}>
@@ -1266,14 +1624,14 @@ ${formData.description}`;
               {/* Step 1: Event Details & Faculty Coordinators */}
               {step === 1 && (
                 <div>
-                  <h2 className="step-question">Tell us about the event</h2>
-                  <p className="step-description">Fill out the basic identifiers, dates, and coordinator mappings for this report.</p>
+                  <h2 className="step-question">Event basics</h2>
+                  <p className="step-description">What happened, when, where, and who coordinated it.</p>
                   
                   <div className="form-row">
                     <div className="form-group">
                       <label className="form-label">Event Type</label>
                       <select 
-                        className={`form-input ${validationErrors.eventType ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.eventType ? 'error' : ''} ${smartFillFlags.includes('eventType') ? 'smart-fill-flagged' : ''}`}
                         value={formData.eventType}
                         onChange={(e) => {
                           setFormData(prev => ({ ...prev, eventType: e.target.value }));
@@ -1284,13 +1642,14 @@ ${formData.description}`;
                         {eventTypesList.map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                       {validationErrors.eventType && <span className="validation-error-text">{validationErrors.eventType}</span>}
+                      {smartFillFlags.includes('eventType') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                     
                     <div className="form-group">
                       <label className="form-label">Event Title</label>
                       <input 
                         type="text" 
-                        className={`form-input ${validationErrors.eventTitle ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.eventTitle ? 'error' : ''} ${smartFillFlags.includes('eventTitle') ? 'smart-fill-flagged' : ''}`}
                         placeholder="e.g. Android Development Workshop"
                         value={formData.eventTitle}
                         onChange={(e) => {
@@ -1299,6 +1658,7 @@ ${formData.description}`;
                         }}
                       />
                       {validationErrors.eventTitle && <span className="validation-error-text">{validationErrors.eventTitle}</span>}
+                      {smartFillFlags.includes('eventTitle') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                   </div>
 
@@ -1307,7 +1667,7 @@ ${formData.description}`;
                       <label className="form-label">Start Date</label>
                       <input 
                         type="date" 
-                        className={`form-input ${validationErrors.startDate ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.startDate ? 'error' : ''} ${smartFillFlags.includes('startDate') ? 'smart-fill-flagged' : ''}`}
                         value={formData.startDate}
                         onChange={(e) => {
                           setFormData(prev => ({ ...prev, startDate: e.target.value }));
@@ -1315,13 +1675,14 @@ ${formData.description}`;
                         }}
                       />
                       {validationErrors.startDate && <span className="validation-error-text">{validationErrors.startDate}</span>}
+                      {smartFillFlags.includes('startDate') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                     
                     <div className="form-group">
                       <label className="form-label">End Date</label>
                       <input 
                         type="date" 
-                        className={`form-input ${validationErrors.endDate ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.endDate ? 'error' : ''} ${smartFillFlags.includes('endDate') ? 'smart-fill-flagged' : ''}`}
                         value={formData.endDate}
                         onChange={(e) => {
                           setFormData(prev => ({ ...prev, endDate: e.target.value }));
@@ -1329,6 +1690,7 @@ ${formData.description}`;
                         }}
                       />
                       {validationErrors.endDate && <span className="validation-error-text">{validationErrors.endDate}</span>}
+                      {smartFillFlags.includes('endDate') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                   </div>
 
@@ -1337,7 +1699,7 @@ ${formData.description}`;
                       <label className="form-label">Start Time</label>
                       <input 
                         type="text" 
-                        className={`form-input ${validationErrors.startTime ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.startTime ? 'error' : ''} ${smartFillFlags.includes('startTime') ? 'smart-fill-flagged' : ''}`}
                         placeholder="e.g. 10:00 AM"
                         value={formData.startTime}
                         onChange={(e) => {
@@ -1346,13 +1708,14 @@ ${formData.description}`;
                         }}
                       />
                       {validationErrors.startTime && <span className="validation-error-text">{validationErrors.startTime}</span>}
+                      {smartFillFlags.includes('startTime') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                     
                     <div className="form-group">
                       <label className="form-label">Duration</label>
                       <input 
                         type="text" 
-                        className={`form-input ${validationErrors.duration ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.duration ? 'error' : ''} ${smartFillFlags.includes('duration') ? 'smart-fill-flagged' : ''}`}
                         placeholder="e.g. 90 minutes, 3 hours"
                         value={formData.duration}
                         onChange={(e) => {
@@ -1361,6 +1724,7 @@ ${formData.description}`;
                         }}
                       />
                       {validationErrors.duration && <span className="validation-error-text">{validationErrors.duration}</span>}
+                      {smartFillFlags.includes('duration') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                   </div>
 
@@ -1368,7 +1732,7 @@ ${formData.description}`;
                     <div className="form-group">
                       <label className="form-label">Venue</label>
                       <select 
-                        className={`form-input ${validationErrors.venue ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.venue ? 'error' : ''} ${smartFillFlags.includes('venue') ? 'smart-fill-flagged' : ''}`}
                         value={formData.venue}
                         onChange={(e) => {
                           setFormData(prev => ({ ...prev, venue: e.target.value }));
@@ -1379,6 +1743,7 @@ ${formData.description}`;
                         {venuesList.map(v => <option key={v} value={v}>{v}</option>)}
                       </select>
                       {validationErrors.venue && <span className="validation-error-text">{validationErrors.venue}</span>}
+                      {smartFillFlags.includes('venue') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
 
                     {(formData.venue === 'Classroom' || formData.venue === 'Other') && (
@@ -1386,7 +1751,7 @@ ${formData.description}`;
                         <label className="form-label">Custom Venue Name</label>
                         <input 
                           type="text" 
-                          className={`form-input ${validationErrors.customVenue ? 'error' : ''}`}
+                          className={`form-input ${validationErrors.customVenue ? 'error' : ''} ${smartFillFlags.includes('customVenue') ? 'smart-fill-flagged' : ''}`}
                           placeholder="e.g. Netaji block 402"
                           value={formData.customVenue}
                           onChange={(e) => {
@@ -1395,6 +1760,7 @@ ${formData.description}`;
                           }}
                         />
                         {validationErrors.customVenue && <span className="validation-error-text">{validationErrors.customVenue}</span>}
+                        {smartFillFlags.includes('customVenue') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                       </div>
                     )}
                   </div>
@@ -1403,7 +1769,7 @@ ${formData.description}`;
                     <div className="form-group">
                       <label className="form-label">Faculty Coordinator 1</label>
                       <select 
-                        className={`form-input ${validationErrors.coord1 ? 'error' : ''}`}
+                        className={`form-input ${validationErrors.coord1 ? 'error' : ''} ${smartFillFlags.includes('coord1') ? 'smart-fill-flagged' : ''}`}
                         value={formData.coord1}
                         onChange={(e) => {
                           setFormData(prev => ({ ...prev, coord1: e.target.value }));
@@ -1416,12 +1782,13 @@ ${formData.description}`;
                         ))}
                       </select>
                       {validationErrors.coord1 && <span className="validation-error-text">{validationErrors.coord1}</span>}
+                      {smartFillFlags.includes('coord1') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
 
                     <div className="form-group">
                       <label className="form-label">Faculty Coordinator 2 (Optional)</label>
                       <select 
-                        className="form-input"
+                        className={`form-input ${smartFillFlags.includes('coord2') ? 'smart-fill-flagged' : ''}`}
                         value={formData.coord2}
                         onChange={(e) => setFormData(prev => ({ ...prev, coord2: e.target.value }))}
                       >
@@ -1430,6 +1797,7 @@ ${formData.description}`;
                           <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
                         ))}
                       </select>
+                      {smartFillFlags.includes('coord2') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
                     </div>
                   </div>
                 </div>
@@ -1440,8 +1808,8 @@ ${formData.description}`;
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                     <div>
-                      <h2 className="step-question">Did you invite a Resource Person?</h2>
-                      <p className="step-description" style={{ marginBottom: 0 }}>Toggle this section to add guest details.</p>
+                      <h2 className="step-question">Resource person</h2>
+                      <p className="step-description" style={{ marginBottom: 0 }}>If you had an external speaker or guest, turn this on and fill in their info.</p>
                     </div>
                     <label className="switch-container" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
                       <input 
@@ -1546,8 +1914,8 @@ ${formData.description}`;
               {/* Step 3: Event Report & Refinement */}
               {step === 3 && (
                 <div>
-                  <h2 className="step-question">Write the event report</h2>
-                  <p className="step-description">Paste the summary, details, and outcomes of the event (200-500 words).</p>
+                  <h2 className="step-question">Event write-up</h2>
+                  <p className="step-description">Write or paste a summary of what happened at the event. Aim for 200 to 500 words.</p>
                   
                   <div className="form-group">
                     <textarea 
@@ -1580,12 +1948,12 @@ ${formData.description}`;
               {/* Step 4: Attendance CSV Upload */}
               {step === 4 && (
                 <div>
-                  <h2 className="step-question">Upload participant attendance</h2>
-                  <p className="step-description">Provide a CSV file of participant attendance. Columns will be auto-mapped.</p>
+                  <h2 className="step-question">Attendance</h2>
+                  <p className="step-description">Upload a CSV with participant info. Columns get matched automatically.</p>
                   
                   <div className="file-dropzone" onClick={() => csvInputRef.current?.click()}>
                     <Upload size={32} className="dropzone-icon" />
-                    <p className="dropzone-text">Drag and drop your attendance CSV file here, or click to browse</p>
+                    <p className="dropzone-text">Drop your CSV here, or click to pick a file</p>
                     <p className="dropzone-hint">Accepted file type: .csv</p>
                   </div>
                   
@@ -1616,8 +1984,8 @@ ${formData.description}`;
               {/* Step 5: Brochure & Images */}
               {step === 5 && (
                 <div>
-                  <h2 className="step-question">Add event media</h2>
-                  <p className="step-description">Upload the flyer/brochure and at least two photos of the event.</p>
+                  <h2 className="step-question">Photos and brochure</h2>
+                  <p className="step-description">Upload the event flyer and at least 2 photos from the event.</p>
                   
                   <div className="form-group" style={{ marginBottom: 24 }}>
                     <label className="form-label">Event Brochure / Flyer</label>
@@ -1639,7 +2007,7 @@ ${formData.description}`;
                   </div>
 
                   <div className="form-group">
-                    <label className="form-label">Event Execution Photos (Minimum 2)</label>
+                    <label className="form-label">Event Photos (at least 2)</label>
                     <button className="btn btn-secondary" onClick={() => imagesInputRef.current?.click()}>
                       Upload Event Photos
                     </button>
@@ -1676,8 +2044,8 @@ ${formData.description}`;
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
                     <div>
-                      <h2 className="step-question">Any expenditure details?</h2>
-                      <p className="step-description" style={{ marginBottom: 0 }}>Toggle to include expenditure and revenue data.</p>
+                      <h2 className="step-question">Money stuff</h2>
+                      <p className="step-description" style={{ marginBottom: 0 }}>Turn this on if there was any spending or revenue for this event.</p>
                     </div>
                     <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
                       <input 
@@ -1851,17 +2219,31 @@ ${formData.description}`;
                 </button>
               </div>
               <div className="review-data-grid">
-                <div className="review-data-item">
-                  <span className="review-data-label">Coordinator 1</span>
-                  <span className="review-data-value">
-                    {coordinators.find(c => c.empId === formData.coord1)?.name || 'None selected'}
-                  </span>
+                <div className="review-data-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span className="review-data-label">Coordinator 1</span>
+                    <span className="review-data-value">
+                      {coordinators.find(c => c.empId === formData.coord1)?.name || 'None selected'}
+                    </span>
+                  </div>
+                  {formData.coord1 && (
+                    <button className="btn btn-link" style={{ color: '#ef4444', fontSize: 12, padding: 0 }} onClick={() => setFormData(prev => ({ ...prev, coord1: '' }))}>
+                      Remove
+                    </button>
+                  )}
                 </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Coordinator 2</span>
-                  <span className="review-data-value">
-                    {coordinators.find(c => c.empId === formData.coord2)?.name || 'None selected'}
-                  </span>
+                <div className="review-data-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span className="review-data-label">Coordinator 2</span>
+                    <span className="review-data-value">
+                      {coordinators.find(c => c.empId === formData.coord2)?.name || 'None selected'}
+                    </span>
+                  </div>
+                  {formData.coord2 && (
+                    <button className="btn btn-link" style={{ color: '#ef4444', fontSize: 12, padding: 0 }} onClick={() => setFormData(prev => ({ ...prev, coord2: '' }))}>
+                      Remove
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
@@ -1893,7 +2275,7 @@ ${formData.description}`;
                   </div>
                 </div>
               ) : (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Not enabled for this report.</div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Skipped.</div>
               )}
             </div>
 
@@ -1902,14 +2284,14 @@ ${formData.description}`;
               <div className="review-section-header">
                 <span className="review-section-title">
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>4. Report Text Outcomes</span>
+                  <span>4. Write-up</span>
                 </span>
                 <button className="btn btn-link" onClick={() => { setView('create'); setStep(3); }}>
                   Edit
                 </button>
               </div>
               <div style={{ fontSize: 14, textOverflow: 'ellipsis', whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto', backgroundColor: '#fafafb', padding: 12, borderRadius: 6, border: '1px solid #eee' }}>
-                {formData.description || 'No report write-up added yet.'}
+                {formData.description || 'Nothing written yet.'}
               </div>
             </div>
 
@@ -1918,7 +2300,7 @@ ${formData.description}`;
               <div className="review-section-header">
                 <span className="review-section-title">
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>5. Attendance & CSV Upload</span>
+                  <span>5. Attendance</span>
                 </span>
                 <button className="btn btn-link" onClick={() => { setView('create'); setStep(4); }}>
                   Edit
@@ -1941,7 +2323,7 @@ ${formData.description}`;
               <div className="review-section-header">
                 <span className="review-section-title">
                   <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>6. Uploaded Media & Brochure</span>
+                  <span>6. Photos & Brochure</span>
                 </span>
                 <button className="btn btn-link" onClick={() => { setView('create'); setStep(5); }}>
                   Edit
@@ -1986,7 +2368,7 @@ ${formData.description}`;
                   </div>
                 </div>
               ) : (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Not enabled for this report.</div>
+                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Skipped.</div>
               )}
             </div>
           </div>
@@ -2238,7 +2620,7 @@ ${formData.description}`;
               {adminSection === 'reports' && (
                 <div>
                   <div className="admin-page-header">
-                    <h1 className="admin-page-title">Uploaded completed reports</h1>
+                    <h1 className="admin-page-title">Saved reports</h1>
                     <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
                       {uploadedReports.length} reports total
                     </span>
@@ -2275,7 +2657,7 @@ ${formData.description}`;
                       </table>
                     ) : (
                       <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)', fontSize: 14 }}>
-                        No event reports uploaded for review yet.
+                        No reports saved yet.
                       </div>
                     )}
                   </div>
@@ -2286,7 +2668,7 @@ ${formData.description}`;
               {adminSection === 'faculty' && (
                 <div>
                   <div className="admin-page-header">
-                    <h1 className="admin-page-title">Manage Faculty Coordinators</h1>
+                    <h1 className="admin-page-title">Faculty coordinators</h1>
                   </div>
                   
                   <div className="admin-card" style={{ marginBottom: 32 }}>
@@ -2461,7 +2843,7 @@ ${formData.description}`;
               {adminSection === 'template' && (
                 <div>
                   <div className="admin-page-header">
-                    <h1 className="admin-page-title">Manage Official templates</h1>
+                    <h1 className="admin-page-title">Report template</h1>
                   </div>
                   
                   <div className="admin-card">
@@ -2472,7 +2854,7 @@ ${formData.description}`;
                       <div>
                         <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>Current Template: template.docx</h3>
                         <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                          This template is used automatically to construct new event report documents.
+                          New reports are generated from this file. Replace it if your college updates the format.
                         </p>
                         <button className="btn btn-secondary" onClick={() => templateInputRef.current?.click()} style={{ gap: 6 }}>
                           <Upload size={14} />
@@ -2501,19 +2883,19 @@ ${formData.description}`;
           <div className="modal-content" style={{ maxWidth: 640 }}>
             <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
               <RefreshCw size={18} style={{ color: 'var(--accent)' }} />
-              <span>Review Groq LLM Refinement</span>
+              <span>Compare drafts</span>
             </h3>
             
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
               <div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Original Draft</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Your version</span>
                 <div style={{ fontSize: 13, padding: 12, border: '1px solid var(--border-medium)', borderRadius: 6, maxHeight: 240, overflowY: 'auto', backgroundColor: '#fcfcfd', whiteSpace: 'pre-wrap' }}>
                   {formData.description}
                 </div>
               </div>
               
               <div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', display: 'block', marginBottom: 6 }}>Refined Outcomes Text</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', display: 'block', marginBottom: 6 }}>Cleaned-up version</span>
                 <div style={{ fontSize: 13, padding: 12, border: '1px solid var(--accent-border)', borderRadius: 6, maxHeight: 240, overflowY: 'auto', backgroundColor: 'var(--accent-light)', whiteSpace: 'pre-wrap' }}>
                   {refinedText}
                 </div>
@@ -2522,13 +2904,180 @@ ${formData.description}`;
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
               <button className="btn btn-secondary" onClick={() => setShowRefineModal(false)}>
-                Discard Refinement
+                Keep original
               </button>
               <button className="btn btn-primary" onClick={applyRefinedText}>
-                Accept & Apply Text
+                Use this version
               </button>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Smart Fill FAB - only on /user workspace */}
+      {currentPath === '/user' && (view === 'landing' || view === 'create') && (
+        <div className="smart-fill-container">
+          {smartFillOpen && (
+            <div className="smart-fill-panel">
+              {smartFillAwaitingVoiceAnswer ? (
+                // Conversational voice prompt view
+                <>
+                  <div className="smart-fill-header">
+                    <span className="smart-fill-title">Conversational Assist</span>
+                    <button className="smart-fill-close" onClick={finishVoiceFlowManually}>
+                      &times;
+                    </button>
+                  </div>
+                  <div className="smart-fill-body">
+                    <div className="smart-fill-prompt-card">
+                      <span className="smart-fill-prompt-label">
+                        Please provide: <strong>{{
+                          eventType: 'Event Type',
+                          eventTitle: 'Event Title',
+                          startDate: 'Start Date',
+                          endDate: 'End Date',
+                          startTime: 'Start Time',
+                          duration: 'Duration',
+                          venue: 'Venue',
+                          customVenue: 'Custom Venue Name',
+                          coord1: 'Primary Faculty Coordinator'
+                        }[smartFillActiveField] || smartFillActiveField}</strong>
+                      </span>
+                      <p className="smart-fill-prompt-question">{voiceSpeakPrompt}</p>
+                    </div>
+
+                    <div className="smart-fill-voice-area">
+                      <button 
+                        className={`smart-fill-mic-btn ${isListening ? 'listening' : ''}`}
+                        onClick={isListening ? stopListening : startListening}
+                      >
+                        <div className="mic-icon">{isListening ? '...' : <Mic size={28} />}</div>
+                      </button>
+                      <p className="smart-fill-voice-hint">
+                        {isListening ? 'Listening... speak now' : 'Tap to start speaking'}
+                      </p>
+                    </div>
+
+                    {voiceTranscript && (
+                      <div className="smart-fill-transcript">
+                        <span className="transcript-label">Your answer:</span>
+                        <p>{voiceTranscript}</p>
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={finishVoiceFlowManually}
+                        style={{ flex: 1, fontSize: 13 }}
+                      >
+                        Finish manually
+                      </button>
+                      <button 
+                        className="btn btn-primary" 
+                        onClick={() => handleSmartFillAnswer(voiceTranscript)}
+                        disabled={smartFillLoading || !voiceTranscript.trim()}
+                        style={{ flex: 1, fontSize: 13, gap: 6 }}
+                      >
+                        {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Check size={14} />}
+                        Submit
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                // Normal Text / Voice modes selection
+                <>
+                  <div className="smart-fill-header">
+                    <span className="smart-fill-title">Smart Fill</span>
+                    <button className="smart-fill-close" onClick={() => { setSmartFillOpen(false); stopListening(); }}>
+                      &times;
+                    </button>
+                  </div>
+                  <div className="smart-fill-tabs">
+                    <button 
+                      className={`smart-fill-tab ${smartFillMode === 'text' ? 'active' : ''}`}
+                      onClick={() => { setSmartFillMode('text'); stopListening(); }}
+                    >Type it</button>
+                    <button 
+                      className={`smart-fill-tab ${smartFillMode === 'voice' ? 'active' : ''}`}
+                      onClick={() => setSmartFillMode('voice')}
+                    >Say it</button>
+                  </div>
+                  <div className="smart-fill-body">
+                    {smartFillMode === 'text' ? (
+                      <>
+                        <textarea
+                          className="smart-fill-textarea"
+                          rows={5}
+                          placeholder={'Describe your event in plain English...\ne.g. "We held a cybersecurity workshop on the 25th at MG Auditorium, 2pm, 3 hours"'}
+                          value={smartFillInput}
+                          onChange={(e) => setSmartFillInput(e.target.value)}
+                        />
+                        <button 
+                          className="btn btn-primary smart-fill-submit"
+                          onClick={() => handleSmartFill(smartFillInput)}
+                          disabled={smartFillLoading || !smartFillInput.trim()}
+                        >
+                          {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
+                          {smartFillLoading ? 'Parsing...' : 'Fill form'}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="smart-fill-voice-area">
+                          <button 
+                            className={`smart-fill-mic-btn ${isListening ? 'listening' : ''}`}
+                            onClick={isListening ? stopListening : startListening}
+                          >
+                            <div className="mic-icon">{isListening ? '...' : <Mic size={28} />}</div>
+                          </button>
+                          <p className="smart-fill-voice-hint">
+                            {isListening ? 'Listening... tap again when done' : 'Tap to start speaking'}
+                          </p>
+                        </div>
+                        {voiceTranscript && (
+                          <div className="smart-fill-transcript">
+                            <span className="transcript-label">Heard:</span>
+                            <p>{voiceTranscript}</p>
+                          </div>
+                        )}
+                        {voiceTranscript && !isListening && (
+                          <button 
+                            className="btn btn-primary smart-fill-submit"
+                            onClick={() => handleSmartFill(voiceTranscript, true)}
+                            disabled={smartFillLoading}
+                          >
+                            {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
+                            {smartFillLoading ? 'Parsing...' : 'Start Voice Flow'}
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {smartFillFlags.length > 0 && (
+                    <div className="smart-fill-flags">
+                      <AlertCircle size={13} />
+                      <span>Couldn't fill: {smartFillFlags.join(', ')}</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+          <button 
+            className={`smart-fill-fab ${smartFillOpen ? 'active' : ''}`}
+            onClick={() => {
+              if (smartFillOpen && smartFillAwaitingVoiceAnswer) {
+                finishVoiceFlowManually();
+              } else {
+                setSmartFillOpen(!smartFillOpen);
+              }
+            }}
+            title="Smart Fill"
+          >
+            <Sparkles size={22} />
+          </button>
         </div>
       )}
 

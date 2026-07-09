@@ -1,7 +1,4 @@
-/* 
-  MIC Eventra - Design System
-  Inspired by Tally.so, Linear, and Notion.
-*/
+/* Eventra styles */
 
 :root {
   /* Accent Colors (Default: Muted Teal/Forest Green) */
@@ -1111,3 +1108,283 @@ input, select, textarea, button {
     width: 100%;
   }
 }
+
+/* Smart Fill FAB */
+.smart-fill-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.smart-fill-fab {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.smart-fill-fab:hover {
+  transform: scale(1.08);
+  box-shadow: 0 6px 24px rgba(0,0,0,0.24);
+}
+
+.smart-fill-fab.active {
+  transform: rotate(45deg);
+}
+
+.smart-fill-panel {
+  width: 340px;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.15);
+  overflow: hidden;
+  animation: smartFillSlideUp 0.25s ease;
+}
+
+@keyframes smartFillSlideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.smart-fill-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px 10px;
+}
+
+.smart-fill-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.smart-fill-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: var(--text-muted);
+  line-height: 1;
+  padding: 0 4px;
+}
+
+.smart-fill-close:hover {
+  color: var(--text-primary);
+}
+
+.smart-fill-tabs {
+  display: flex;
+  gap: 0;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.smart-fill-tab {
+  flex: 1;
+  padding: 8px 0;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.smart-fill-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.smart-fill-tab:hover {
+  color: var(--text-primary);
+}
+
+.smart-fill-body {
+  padding: 16px;
+}
+
+.smart-fill-textarea {
+  width: 100%;
+  border: 1px solid var(--border-medium);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  resize: vertical;
+  background: var(--bg);
+  color: var(--text-primary);
+  min-height: 100px;
+}
+
+.smart-fill-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+.smart-fill-textarea::placeholder {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.smart-fill-submit {
+  width: 100%;
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.smart-fill-voice-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 16px 0 8px;
+}
+
+.smart-fill-mic-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--border-medium);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.smart-fill-mic-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.smart-fill-mic-btn.listening {
+  border-color: #ef4444;
+  background: #fef2f2;
+  color: #ef4444;
+  animation: micPulse 1.5s ease-in-out infinite;
+}
+
+.dark-theme .smart-fill-mic-btn.listening {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+@keyframes micPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.3); }
+  50% { box-shadow: 0 0 0 12px rgba(239, 68, 68, 0); }
+}
+
+.smart-fill-voice-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.smart-fill-transcript {
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--bg);
+  border-radius: 8px;
+  border: 1px solid var(--border-light);
+}
+
+.smart-fill-transcript .transcript-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 4px;
+}
+
+.smart-fill-transcript p {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.smart-fill-flags {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 16px 14px;
+  font-size: 12px;
+  color: #d97706;
+  background: rgba(217, 119, 6, 0.06);
+  border-top: 1px solid var(--border-light);
+}
+
+.dark-theme .smart-fill-flags {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+}
+
+.smart-fill-prompt-card {
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.smart-fill-prompt-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  display: block;
+  margin-bottom: 6px;
+}
+
+.smart-fill-prompt-question {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Visual Flagging styling */
+.form-input.smart-fill-flagged {
+  border: 1.5px dashed #d97706 !important;
+  background-color: rgba(217, 119, 6, 0.02) !important;
+}
+
+.dark-theme .form-input.smart-fill-flagged {
+  border-color: #fbbf24 !important;
+  background-color: rgba(251, 191, 36, 0.02) !important;
+}
+
+.smart-fill-flag-text {
+  font-size: 11px;
+  color: #d97706;
+  margin-top: 4px;
+  display: block;
+}
+
+.dark-theme .smart-fill-flag-text {
+  color: #fbbf24;
+}
+

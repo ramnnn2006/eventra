@@ -1,52 +1,64 @@
-# MIC Event Report Generator
+# Eventra
 
-Automate the creation, management, and administration of event reports for the Microsoft Innovations Club (MIC) at VIT Chennai. This application replaces manual report formatting by generating documents that match the official VIT event report template.
+Event report generator for Microsoft Innovations Club, VIT Chennai.
 
-![Login Page Preview](public/login_mockup.jpg)
+## What it does
 
-## Key Features
+- Walk through a step-by-step form with your event details, and it spits out a formatted Word doc matching VIT's official report template.
+- Smart Fill: describe your event in plain text or voice, and the form fills itself using Groq LLM. No manual entry needed.
+- Upload a CSV for attendance. Columns get auto-mapped so you don't have to reformat anything.
+- Admin panel for managing coordinators, venues, event types, and templates.
 
-- **Conversational Wizard**: Tally-style form interface that collects event details step-by-step to avoid form fatigue.
-- **CSV Attendance Mapping**: Upload participant CSV files. Column headers are automatically detected, types (Student, Faculty, External) are identified, and participant counts are calculated instantly.
-- **LLM Outcomes Refinement**: Refine pasted report drafts using the Groq LLaMA model to improve clarity and grammar while keeping original facts.
-- **Rich Document Exports**:
-  - **Standard DOCX**: Generates a text-filled document based on the official Word template.
-  - **Rich Word DOC**: Generates a rich text document with brochure flyer, event execution photos, and electronic faculty signatures embedded as base64 images.
-- **Admin Controls**: Manage faculty coordinators, signatures, configuration defaults (venues, event types), and review uploaded reports.
-- **Aesthetic Theme**: Monochromatic visual layout using light mode only, soft off-white background, and configurable accent colors.
+## Tech stack
 
-## Setup Instructions
+- Vite 5
+- React
+- Vanilla CSS
+- Groq API (LLaMA 3.3 70B)
+- Docxtemplater + PizZip
+- PapaParse
+- Lucide React
+- Convex (optional backend)
 
-### Prerequisites
-- Node.js (v18 or higher)
-- npm
+## Getting started
 
-### Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/ramnnn2006/reporter.git
-   cd reporter
-   ```
+```bash
+git clone https://github.com/ramnnn2006/reporter.git
+cd reporter
+npm install
+npm run dev
+```
 
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
+Create a `.env` file if you need these:
 
-3. Run local dev server:
-   ```bash
-   npm run dev
-   ```
+```
+VITE_GROQ_API_KEY=your_key_here
+VITE_CONVEX_URL=your_convex_url_here
+```
 
-4. Build production bundle:
-   ```bash
-   npm run build
-   ```
+Both are optional. The Groq key has a built-in fallback, and the app works fine without Convex.
 
-## Tech Stack
-- Vite 5 (Bundler)
-- React (Frontend Library)
-- Vanilla CSS (Styling)
-- Docxtemplater & PizZip (DOCX Template Engine)
-- PapaParse (CSV Parser)
-- Lucide React (Icons)
+## Deployment
+
+```bash
+npm run build
+```
+
+Works on Vercel out of the box.
+
+If you're using Convex:
+
+```bash
+npx convex deploy
+```
+
+Then add `VITE_CONVEX_URL` to your hosting provider's environment variables.
+
+## Project structure
+
+```
+src/App.jsx          - everything (single-file app)
+src/index.css        - all styles
+public/template.docx - report template
+convex/              - optional Convex backend
+```
