@@ -77,11 +77,14 @@ const LoadingFallback = () => (
   </div>
 );
 
-function ConvexWrapper({ children, setDb }) {
+function ConvexWrapper({ children, setDb, userId }) {
   const coordinators = useQuery("db:getCoordinators");
   const venues = useQuery("db:getVenues");
   const eventTypes = useQuery("db:getEventTypes");
   const reports = useQuery("db:getReports");
+  const logos = useQuery("db:getLogos");
+  const customTemplate = useQuery("db:getCustomTemplate");
+  const userSettings = useQuery("db:getUserSettings", { userId });
 
   const addCoordinator = useMutation("db:addCoordinator");
   const removeCoordinator = useMutation("db:removeCoordinator");
@@ -91,6 +94,12 @@ function ConvexWrapper({ children, setDb }) {
   const removeEventType = useMutation("db:removeEventType");
   const addReport = useMutation("db:addReport");
   const removeReport = useMutation("db:removeReport");
+  const addLogo = useMutation("db:addLogo");
+  const removeLogo = useMutation("db:removeLogo");
+  const updateLogo = useMutation("db:updateLogo");
+  const setCustomTemplate = useMutation("db:setCustomTemplate");
+  const setUserSettings = useMutation("db:setUserSettings");
+  const initializeDefaults = useMutation("db:initializeDefaults");
 
   useEffect(() => {
     setDb({
@@ -98,6 +107,9 @@ function ConvexWrapper({ children, setDb }) {
       venues: venues || [],
       eventTypes: eventTypes || [],
       uploadedReports: reports || [],
+      logos: logos || [],
+      customTemplate: customTemplate || null,
+      userSettings: userSettings || null,
       addCoordinator: async (empId, name, department, signature) => {
         await addCoordinator({ empId, name, department, signature });
       },
@@ -121,12 +133,32 @@ function ConvexWrapper({ children, setDb }) {
       },
       removeReport: async (id) => {
         await removeReport({ id });
+      },
+      addLogo: async (id, name, isOptional, src, dataUrl) => {
+        await addLogo({ id, name, isOptional, src, dataUrl });
+      },
+      removeLogo: async (id) => {
+        await removeLogo({ id });
+      },
+      updateLogo: async (id, dataUrl) => {
+        await updateLogo({ id, dataUrl });
+      },
+      setCustomTemplate: async (templateData) => {
+        await setCustomTemplate({ templateData });
+      },
+      setUserSettings: async (theme, accent) => {
+        await setUserSettings({ userId, theme, accent });
+      },
+      initializeDefaults: async () => {
+        await initializeDefaults();
       }
     });
   }, [
-    coordinators, venues, eventTypes, reports,
+    coordinators, venues, eventTypes, reports, logos, customTemplate, userSettings, userId,
     addCoordinator, removeCoordinator, addVenue, removeVenue,
     addEventType, removeEventType, addReport, removeReport,
+    addLogo, removeLogo, updateLogo, setCustomTemplate,
+    setUserSettings, initializeDefaults,
     setDb
   ]);
 
@@ -156,6 +188,7 @@ export default function App() {
   // Navigation & Auth (Session persisted via sessionStorage)
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [userRole, setUserRole] = useState(() => sessionStorage.getItem('mic_user_role') || null);
+  const [userId] = useState(() => sessionStorage.getItem('mic_user_id') || 'default_user');
   const [view, setView] = useState('landing'); // landing, create, review, preview
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -173,25 +206,56 @@ export default function App() {
     window.history.pushState({}, '', path);
     setCurrentPath(path);
   }, []);
-  
-  // Theme state
+
+  // Theme state (loaded from Convex, with fallback)
   const [accent, setAccent] = useState({ name: 'teal', h: 170, s: 75, l: 35 });
-  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'light');
+  const [theme, setTheme] = useState('light');
   const [validationErrors, setValidationErrors] = useState({});
 
   useEffect(() => {
     document.body.className = theme === 'dark' ? 'dark-theme' : '';
-    localStorage.setItem('theme', theme);
   }, [theme]);
-  
-  // App settings & collections (persisted in localStorage)
-  const [coordinators, setCoordinators] = useState([]);
-  const [venues, setVenues] = useState([]);
-  const [eventTypes, setEventTypes] = useState([]);
-  const [uploadedReports, setUploadedReports] = useState([]);
-  const [logos, setLogos] = useState([]);
-  const [customTemplate, setCustomTemplate] = useState(null);
-  
+
+  // Load user settings from Convex
+  useEffect(() => {
+    if (convexDb && convexDb.userSettings) {
+      if (convexDb.userSettings.theme) {
+        setTheme(convexDb.userSettings.theme);
+      }
+      if (convexDb.userSettings.accent) {
+        setAccent(convexDb.userSettings.accent);
+      }
+    }
+  }, [convexDb]);
+
+  // Save theme to Convex
+  useEffect(() => {
+    if (convexDb && convexDb.setUserSettings) {
+      convexDb.setUserSettings(theme, accent);
+    }
+  }, [theme, accent, convexDb]);
+
+  // Initialize default data in Convex on first load
+  useEffect(() => {
+    if (convexDb && convexDb.initializeDefaults) {
+      convexDb.initializeDefaults();
+    }
+  }, [convexDb]);
+
+  // Load draft from sessionStorage on mount
+  useEffect(() => {
+    const savedDraft = sessionStorage.getItem('mic_report_draft');
+    if (savedDraft) {
+      try {
+        const parsedDraft = JSON.parse(savedDraft);
+        setFormData(parsedDraft);
+        showToast('Restored draft from last session');
+      } catch (e) {
+        // Ignore parse errors
+      }
+    }
+  }, []);
+
   // Form Wizard state
   const [step, setStep] = useState(1);
   const [formData, setFormData] = useState({
@@ -247,13 +311,13 @@ export default function App() {
   const [smartFillActiveField, setSmartFillActiveField] = useState(null); // field being prompted for
   const [smartFillAwaitingVoiceAnswer, setSmartFillAwaitingVoiceAnswer] = useState(false);
   const [voiceSpeakPrompt, setVoiceSpeakPrompt] = useState('');
-  
+
   // Admin editing states
   const [adminSection, setAdminSection] = useState('reports'); // reports, faculty, config, template, logos
   const [newFaculty, setNewFaculty] = useState({ empId: '', name: '', department: '', signature: '' });
   const [newVenue, setNewVenue] = useState('');
   const [newEventType, setNewEventType] = useState('');
-  
+
   // File inputs references
   const brochureInputRef = useRef(null);
   const imagesInputRef = useRef(null);
@@ -275,121 +339,15 @@ export default function App() {
 
   // Role based redirection control
   useEffect(() => {
-    if (userRole) {
-      if (currentPath === '/') {
-        navigate(userRole === 'admin' ? '/admin' : '/user');
-      } else if (currentPath === '/admin' || currentPath === '/mic') {
-        if (userRole !== 'admin') {
-          navigate('/user');
-          showToast('Access denied: Administrator role required');
-        }
-      }
+    if (userRole && currentPath === '/') {
+      navigate(userRole === 'admin' ? '/admin' : '/user');
+    } else if (currentPath === '/admin' && userRole !== 'admin') {
+      navigate('/');
+      showToast('Access denied: Administrator role required');
+    } else if (currentPath === '/user' && !userRole) {
+      navigate('/');
     }
   }, [currentPath, userRole, navigate]);
-
-  // Initialize data on mount
-  useEffect(() => {
-    // Load config from localStorage or fallback to defaults
-    const savedCoordinators = localStorage.getItem('mic_coordinators');
-    let coords = [];
-    if (savedCoordinators) {
-      try {
-        coords = JSON.parse(savedCoordinators);
-      } catch (e) {
-        coords = [];
-      }
-    }
-    const defaultCoords = [
-      { empId: '50930', name: 'Dr Anusha K', department: 'SCOPE', signature: '' },
-      { empId: '51327', name: 'Dr Braveen M', department: 'SCOPE', signature: '' }
-    ];
-    defaultCoords.forEach(def => {
-      if (!coords.some(c => c.empId === def.empId)) {
-        coords.push(def);
-      }
-    });
-    setCoordinators(coords);
-    localStorage.setItem('mic_coordinators', JSON.stringify(coords));
-
-    const savedVenues = localStorage.getItem('mic_venues');
-    if (savedVenues) {
-      setVenues(JSON.parse(savedVenues));
-    } else {
-      const defaults = ['MG Auditorium', 'Kasturba Auditorium', 'Kamaraj Auditorium', 'Netaji Auditorium', 'VOC Auditorium', 'Classroom', 'Online', 'Other'];
-      setVenues(defaults);
-      localStorage.setItem('mic_venues', JSON.stringify(defaults));
-    }
-
-    const savedEventTypes = localStorage.getItem('mic_event_types');
-    if (savedEventTypes) {
-      setEventTypes(JSON.parse(savedEventTypes));
-    } else {
-      const defaults = ['Workshop', 'Online Workshop', 'Hackathon', 'Competition', 'Guest Lecture', 'Seminar', 'Symposium', 'Conference', 'Value Added Session', 'Training Program', 'Other'];
-      setEventTypes(defaults);
-      localStorage.setItem('mic_event_types', JSON.stringify(defaults));
-    }
-
-    const savedReports = localStorage.getItem('mic_uploaded_reports');
-    if (savedReports) {
-      setUploadedReports(JSON.parse(savedReports));
-    }
-
-    // Load custom template state
-    const savedTemplate = localStorage.getItem('mic_custom_template');
-    if (savedTemplate) {
-      setCustomTemplate(savedTemplate);
-    }
-
-    // Load and build logos list
-    const loadLogos = async () => {
-      const savedLogos = localStorage.getItem('mic_logos');
-      let currentLogos = [];
-      if (savedLogos) {
-        try {
-          currentLogos = JSON.parse(savedLogos);
-        } catch (e) {
-          currentLogos = [];
-        }
-      }
-      
-      const defaultLogos = [
-        { id: 'vitc', name: 'VIT Chennai', isOptional: false, src: '/vitclogo.png', dataUrl: '' },
-        { id: 'mic', name: 'Microsoft Innovations Club', isOptional: false, src: '/miclogo.png', dataUrl: '' },
-        { id: 'swc', name: 'Student Welfare', isOptional: false, src: '/swc.png', dataUrl: '' },
-        { id: 'iic', name: 'IIC', isOptional: true, src: '/iic.png', dataUrl: '' },
-        { id: 'mlsa', name: 'MLSA', isOptional: true, src: '/mlsa.png', dataUrl: '' },
-        { id: 'vnest', name: 'VNEST', isOptional: true, src: '/vnest.png', dataUrl: '' }
-      ];
-
-      if (currentLogos.length === 0) {
-        currentLogos = defaultLogos;
-      } else {
-        defaultLogos.forEach(def => {
-          if (!currentLogos.some(l => l.id === def.id)) {
-            currentLogos.push(def);
-          }
-        });
-      }
-
-      const updatedLogos = await Promise.all(currentLogos.map(async (logo) => {
-        if (!logo.dataUrl && logo.src) {
-          const dataUrl = await fetchImageAsBase64(logo.src);
-          return { ...logo, dataUrl: dataUrl || '' };
-        }
-        return logo;
-      }));
-      setLogos(updatedLogos);
-      localStorage.setItem('mic_logos', JSON.stringify(updatedLogos));
-    };
-    loadLogos();
-
-    const savedDraft = localStorage.getItem('mic_report_draft');
-    if (savedDraft) {
-      const parsedDraft = JSON.parse(savedDraft);
-      setFormData(parsedDraft);
-      showToast('Restored draft from last session');
-    }
-  }, []);
 
   // Update root css variables when accent changes
   useEffect(() => {
@@ -398,10 +356,10 @@ export default function App() {
     document.documentElement.style.setProperty('--accent-l', accent.l + '%');
   }, [accent]);
 
-  // Autosave draft when formData changes
+  // Autosave draft to sessionStorage when formData changes
   useEffect(() => {
     if (view === 'create' || view === 'review') {
-      localStorage.setItem('mic_report_draft', JSON.stringify(formData));
+      sessionStorage.setItem('mic_report_draft', JSON.stringify(formData));
     }
   }, [formData, view]);
 
@@ -504,7 +462,7 @@ export default function App() {
 
   const discardDraft = useCallback(() => {
     if (window.confirm('Are you sure you want to discard this report? All unsaved progress will be lost.')) {
-      localStorage.removeItem('mic_report_draft');
+      sessionStorage.removeItem('mic_report_draft');
       setFormData({
         eventType: 'Workshop',
         eventTitle: '',
@@ -534,19 +492,20 @@ export default function App() {
     }
   }, [showToast]);
 
-  // Dynamic lists from Convex or local fallback (memoized)
-  const coordinatorsList = useMemo(() => convexDb ? convexDb.coordinators : coordinators, [convexDb, coordinators]);
-  const venuesRaw = useMemo(() => convexDb ? convexDb.venues : venues, [convexDb, venues]);
-  const venuesList = useMemo(() => convexDb ? convexDb.venues.map(v => typeof v === 'object' ? v.name : v) : venues, [convexDb, venues]);
-  const eventTypesRaw = useMemo(() => convexDb ? convexDb.eventTypes : eventTypes, [convexDb, eventTypes]);
-  const eventTypesList = useMemo(() => convexDb ? convexDb.eventTypes.map(t => typeof t === 'object' ? t.name : t) : eventTypes, [convexDb, eventTypes]);
-  const uploadedReportsList = useMemo(() => convexDb ? convexDb.uploadedReports : uploadedReports, [convexDb, uploadedReports]);
+  // Dynamic lists from Convex (memoized)
+  const coordinatorsList = useMemo(() => convexDb?.coordinators || [], [convexDb]);
+  const venuesRaw = useMemo(() => convexDb?.venues || [], [convexDb]);
+  const venuesList = useMemo(() => (convexDb?.venues || []).map(v => typeof v === 'object' ? v.name : v), [convexDb]);
+  const eventTypesRaw = useMemo(() => convexDb?.eventTypes || [], [convexDb]);
+  const eventTypesList = useMemo(() => (convexDb?.eventTypes || []).map(t => typeof t === 'object' ? t.name : t), [convexDb]);
+  const uploadedReportsList = useMemo(() => convexDb?.uploadedReports || [], [convexDb]);
+  const logosList = useMemo(() => convexDb?.logos || [], [convexDb]);
 
   // Generation of docx template
   const generateDocxFile = useCallback(async () => {
     try {
       let buffer;
-      const savedTemplate = localStorage.getItem('mic_custom_template') || customTemplate;
+      const savedTemplate = convexDb?.customTemplate || customTemplate;
       if (savedTemplate) {
         buffer = base64ToArrayBuffer(savedTemplate);
       } else {
@@ -626,20 +585,6 @@ export default function App() {
         const base64 = reader.result.split(',')[1];
         if (convexDb) {
           await convexDb.addReport(title, formData.eventType, formData.startDate, fileName, base64);
-        } else {
-          const newReport = {
-            id: Date.now(),
-            eventName: title,
-            filename: fileName,
-            uploadDate: new Date().toLocaleDateString(),
-            status: 'Saved',
-            fileData: base64
-          };
-          setUploadedReports(prev => {
-            const updated = [...prev, newReport];
-            localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
-            return updated;
-          });
         }
       };
       reader.readAsDataURL(out);
@@ -662,11 +607,11 @@ export default function App() {
   const generateRichWordDoc = useCallback(() => {
     const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
     const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
-    
-    const activeOptionalLogos = logos.filter(l => l.isOptional && formData.selectedLogos.includes(l.id));
-    const leftLogo = logos.find(l => l.id === 'vitc');
-    const centerLogo = logos.find(l => l.id === 'mic');
-    const rightLogo = logos.find(l => l.id === 'swc');
+
+    const activeOptionalLogos = logosList.filter(l => l.isOptional && formData.selectedLogos.includes(l.id));
+    const leftLogo = logosList.find(l => l.id === 'vitc');
+    const centerLogo = logosList.find(l => l.id === 'mic');
+    const rightLogo = logosList.find(l => l.id === 'swc');
 
     const half = Math.ceil(activeOptionalLogos.length / 2);
     const leftGroup = activeOptionalLogos.slice(0, half);
@@ -897,20 +842,6 @@ export default function App() {
       const base64 = reader.result.split(',')[1];
       if (convexDb) {
         await convexDb.addReport(title, formData.eventType, formData.startDate, fileName, base64);
-      } else {
-        const newReport = {
-          id: Date.now(),
-          eventName: title,
-          filename: fileName,
-          uploadDate: new Date().toLocaleDateString(),
-          status: 'Saved',
-          fileData: base64
-        };
-        setUploadedReports(prev => {
-          const updated = [...prev, newReport];
-          localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
-          return updated;
-        });
       }
     };
     reader.readAsDataURL(blob);
@@ -941,20 +872,6 @@ export default function App() {
 
     if (convexDb) {
       await convexDb.addReport(eventName, 'Direct Upload', new Date().toLocaleDateString(), newFilename, 'base64_simulated_contents');
-    } else {
-      const newReport = {
-        id: Date.now(),
-        eventName: eventName,
-        filename: newFilename,
-        uploadDate: new Date().toLocaleDateString(),
-        status: 'Pending Review',
-        fileData: 'base64_simulated_contents'
-      };
-      setUploadedReports(prev => {
-        const updated = [...prev, newReport];
-        localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
-        return updated;
-      });
     }
     showToast(`Report uploaded and saved as ${newFilename}`);
     if (docxInputRef.current) docxInputRef.current.value = '';
@@ -965,12 +882,6 @@ export default function App() {
       const id = rep.id || rep._id;
       if (convexDb) {
         await convexDb.removeReport(id);
-      } else {
-        setUploadedReports(prev => {
-          const updated = prev.filter(r => r.id !== id);
-          localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
-          return updated;
-        });
       }
       showToast('Report deleted.');
     }
@@ -986,12 +897,6 @@ export default function App() {
 
     if (convexDb) {
       await convexDb.addCoordinator(newFaculty.empId, newFaculty.name, newFaculty.department, newFaculty.signature || '');
-    } else {
-      setCoordinators(prev => {
-        const updated = [...prev, newFaculty];
-        localStorage.setItem('mic_coordinators', JSON.stringify(updated));
-        return updated;
-      });
     }
     setNewFaculty({ empId: '', name: '', department: '', signature: '' });
     showToast('Faculty coordinator added');
@@ -1013,12 +918,6 @@ export default function App() {
     if (window.confirm('Delete this coordinator?')) {
       if (convexDb) {
         await convexDb.removeCoordinator(coord._id);
-      } else {
-        setCoordinators(prev => {
-          const updated = prev.filter(c => c.empId !== coord.empId);
-          localStorage.setItem('mic_coordinators', JSON.stringify(updated));
-          return updated;
-        });
       }
       showToast('Faculty coordinator deleted');
     }
@@ -1029,12 +928,6 @@ export default function App() {
     if (newVenue.trim() && !venuesList.includes(newVenue.trim())) {
       if (convexDb) {
         await convexDb.addVenue(newVenue.trim());
-      } else {
-        setVenues(prev => {
-          const updated = [...prev, newVenue.trim()];
-          localStorage.setItem('mic_venues', JSON.stringify(updated));
-          return updated;
-        });
       }
       setNewVenue('');
       showToast('Venue added');
@@ -1045,12 +938,6 @@ export default function App() {
     if (window.confirm(`Delete venue "${typeof venue === 'object' ? venue.name : venue}"?`)) {
       if (convexDb) {
         await convexDb.removeVenue(venue._id);
-      } else {
-        setVenues(prev => {
-          const updated = prev.filter(v => v !== venue);
-          localStorage.setItem('mic_venues', JSON.stringify(updated));
-          return updated;
-        });
       }
       showToast('Venue deleted');
     }
@@ -1060,12 +947,6 @@ export default function App() {
     if (newEventType.trim() && !eventTypesList.includes(newEventType.trim())) {
       if (convexDb) {
         await convexDb.addEventType(newEventType.trim());
-      } else {
-        setEventTypes(prev => {
-          const updated = [...prev, newEventType.trim()];
-          localStorage.setItem('mic_event_types', JSON.stringify(updated));
-          return updated;
-        });
       }
       setNewEventType('');
       showToast('Event type added');
@@ -1076,42 +957,38 @@ export default function App() {
     if (window.confirm(`Delete event type "${typeof type === 'object' ? type.name : type}"?`)) {
       if (convexDb) {
         await convexDb.removeEventType(type._id);
-      } else {
-        setEventTypes(prev => {
-          const updated = prev.filter(t => t !== type);
-          localStorage.setItem('mic_event_types', JSON.stringify(updated));
-          return updated;
-        });
       }
       showToast('Event type deleted');
     }
   }, [convexDb, showToast]);
 
   // Replaced template upload
-  const handleTemplateUpload = useCallback((e) => {
+  const handleTemplateUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = arrayBufferToBase64(event.target.result);
         setCustomTemplate(base64);
-        localStorage.setItem('mic_custom_template', base64);
+        if (convexDb) {
+          await convexDb.setCustomTemplate(base64);
+        }
         showToast('Template file replaced and saved.');
       };
       reader.readAsArrayBuffer(file);
       if (templateInputRef.current) templateInputRef.current.value = '';
     }
-  }, [showToast]);
+  }, [convexDb, showToast]);
 
   // Logo uploads and deletion
-  const handleLogoUpload = useCallback((e) => {
+  const handleLogoUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     if (file) {
       const name = prompt('Enter a display name for this logo:');
       if (!name) return;
 
       const reader = new FileReader();
-      reader.onload = (event) => {
+      reader.onload = async (event) => {
         const base64 = event.target.result;
         const newLogo = {
           id: 'logo_' + Date.now(),
@@ -1120,30 +997,26 @@ export default function App() {
           src: '',
           dataUrl: base64
         };
-        setLogos(prev => {
-          const updated = [...prev, newLogo];
-          localStorage.setItem('mic_logos', JSON.stringify(updated));
-          return updated;
-        });
+        if (convexDb) {
+          await convexDb.addLogo(newLogo.id, newLogo.name, newLogo.isOptional, newLogo.src, newLogo.dataUrl);
+        }
         showToast(`Logo "${name}" uploaded successfully.`);
       };
       reader.readAsDataURL(file);
     }
     if (logoInputRef.current) logoInputRef.current.value = '';
-  }, [showToast]);
+  }, [convexDb, showToast]);
 
-  const deleteLogo = useCallback((id) => {
-    const logoToDelete = logos.find(l => l.id === id);
+  const deleteLogo = useCallback(async (id) => {
+    const logoToDelete = logosList.find(l => l.id === id);
     if (!logoToDelete) return;
     if (window.confirm(`Are you sure you want to delete the logo "${logoToDelete.name}"?`)) {
-      setLogos(prev => {
-        const updated = prev.filter(l => l.id !== id);
-        localStorage.setItem('mic_logos', JSON.stringify(updated));
-        return updated;
-      });
+      if (convexDb) {
+        await convexDb.removeLogo(logoToDelete._id);
+      }
       showToast(`Logo "${logoToDelete.name}" deleted.`);
     }
-  }, [logos, showToast]);
+  }, [convexDb, logosList, showToast]);
 
   // Upload brochure handler
   const handleBrochureUpload = useCallback((e) => {
@@ -1694,7 +1567,6 @@ Rules:
                   uploadedReports={uploadedReports}
                   uploadedReportsList={uploadedReportsList}
                   deleteReport={deleteReport}
-                  coordinators={coordinators}
                   coordinatorsList={coordinatorsList}
                   newFaculty={newFaculty}
                   setNewFaculty={setNewFaculty}
@@ -1714,7 +1586,7 @@ Rules:
                   deleteEventType={deleteEventType}
                   templateInputRef={templateInputRef}
                   handleTemplateUpload={handleTemplateUpload}
-                  logos={logos}
+                  logos={logosList}
                   logoInputRef={logoInputRef}
                   handleLogoUpload={handleLogoUpload}
                   deleteLogo={deleteLogo}
@@ -1757,7 +1629,7 @@ Rules:
                       handleImagesUpload={handleImagesUpload}
                       discardDraft={discardDraft}
                       showToast={showToast}
-                      logos={logos}
+                      logos={logosList}
                     />
                   )}
 
@@ -1779,7 +1651,7 @@ Rules:
                       generateDocxFile={generateDocxFile}
                       generateRichWordDoc={generateRichWordDoc}
                       coordinators={coordinatorsList}
-                      logos={logos}
+                      logos={logosList}
                     />
                   )}
                 </>
@@ -2027,7 +1899,7 @@ Rules:
   );
 
   if (isConvexEnabled) {
-    return <ConvexWrapper setDb={setConvexDb}>{mainContent}</ConvexWrapper>;
+    return <ConvexWrapper setDb={setConvexDb} userId={userId}>{mainContent}</ConvexWrapper>;
   }
   return mainContent;
 }
