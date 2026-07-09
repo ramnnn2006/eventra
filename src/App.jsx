@@ -19,6 +19,10 @@ const DocumentPreview = React.lazy(() => import('./components/DocumentPreview'))
 const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
+const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME || 'admin';
+const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || 'admin6767';
+const USER_USERNAME = import.meta.env.VITE_USER_USERNAME || 'user';
+const USER_PASSWORD = import.meta.env.VITE_USER_PASSWORD || 'user123';
 
 const escapeHtml = (unsafe) => {
   if (!unsafe) return '';
@@ -464,7 +468,7 @@ export default function App() {
   // Auth Action
   const handleLogin = useCallback((e) => {
     e.preventDefault();
-    if (username === 'admin' && password === 'admin6767') {
+    if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
       setUserRole('admin');
       sessionStorage.setItem('mic_user_role', 'admin');
       sessionStorage.setItem('mic_username', 'admin');
@@ -473,7 +477,7 @@ export default function App() {
       setPassword('');
       showToast('Logged in as administrator');
       navigate('/admin');
-    } else if (username === 'user' && password === 'user123') {
+    } else if (username === USER_USERNAME && password === USER_PASSWORD) {
       setUserRole('user');
       sessionStorage.setItem('mic_user_role', 'user');
       sessionStorage.setItem('mic_username', 'user');
