@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { 
   FileText, Upload, ArrowRight, ArrowLeft, Check, Edit, Settings, LogOut, 
   Users, CheckCircle, Plus, Trash, MapPin, Calendar, Clock, DollarSign, 
@@ -9,16 +9,16 @@ import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { useQuery, useMutation } from "convex/react";
 
-// Import modular components
-import LoginCard from './components/LoginCard';
-import PortalLanding from './components/PortalLanding';
-import CoordinatorLanding from './components/CoordinatorLanding';
-import ReportWizard from './components/ReportWizard';
-import ReviewSummary from './components/ReviewSummary';
-import DocumentPreview from './components/DocumentPreview';
-import AdminPanel from './components/AdminPanel';
+// Lazy-load modular components for code splitting
+const LoginCard = React.lazy(() => import('./components/LoginCard'));
+const PortalLanding = React.lazy(() => import('./components/PortalLanding'));
+const CoordinatorLanding = React.lazy(() => import('./components/CoordinatorLanding'));
+const ReportWizard = React.lazy(() => import('./components/ReportWizard'));
+const ReviewSummary = React.lazy(() => import('./components/ReviewSummary'));
+const DocumentPreview = React.lazy(() => import('./components/DocumentPreview'));
+const AdminPanel = React.lazy(() => import('./components/AdminPanel'));
 
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
 
 const escapeHtml = (unsafe) => {
   if (!unsafe) return '';
@@ -62,10 +62,16 @@ async function fetchImageAsBase64(url) {
       reader.readAsDataURL(blob);
     });
   } catch (e) {
-    console.error('Failed to fetch image as base64', url, e);
     return null;
   }
 }
+
+// Loading fallback component
+const LoadingFallback = () => (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', width: '100%' }}>
+    <RefreshCw size={28} className="spin" style={{ color: 'var(--accent)' }} />
+  </div>
+);
 
 function ConvexWrapper({ children, setDb }) {
   const coordinators = useQuery("db:getCoordinators");
@@ -127,6 +133,22 @@ export default function App() {
   const isConvexEnabled = !!import.meta.env.VITE_CONVEX_URL;
   const [convexDb, setConvexDb] = useState(null);
 
+  // Online / Offline tracking
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+
+  useEffect(() => {
+    const goOnline = () => setIsOnline(true);
+    const goOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
   // Navigation & Auth (Session persisted via sessionStorage)
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
   const [userRole, setUserRole] = useState(() => sessionStorage.getItem('mic_user_role') || null);
@@ -143,10 +165,10 @@ export default function App() {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const navigate = (path) => {
+  const navigate = useCallback((path) => {
     window.history.pushState({}, '', path);
     setCurrentPath(path);
-  };
+  }, []);
   
   // Theme state
   const [accent, setAccent] = useState({ name: 'teal', h: 170, s: 75, l: 35 });
@@ -239,13 +261,13 @@ export default function App() {
   const recognitionRef = useRef(null);
 
   // Available accent colors
-  const accentColors = [
+  const accentColors = useMemo(() => [
     { name: 'teal', h: 170, s: 75, l: 35 },
     { name: 'slate', h: 215, s: 60, l: 40 },
     { name: 'steel', h: 200, s: 70, l: 35 },
     { name: 'rose', h: 350, s: 65, l: 45 },
     { name: 'charcoal', h: 220, s: 15, l: 35 }
-  ];
+  ], []);
 
   // Role based redirection control
   useEffect(() => {
@@ -259,7 +281,7 @@ export default function App() {
         }
       }
     }
-  }, [currentPath, userRole]);
+  }, [currentPath, userRole, navigate]);
 
   // Initialize data on mount
   useEffect(() => {
@@ -338,7 +360,6 @@ export default function App() {
       if (currentLogos.length === 0) {
         currentLogos = defaultLogos;
       } else {
-        // Ensure default required logos are always present
         defaultLogos.forEach(def => {
           if (!currentLogos.some(l => l.id === def.id)) {
             currentLogos.push(def);
@@ -346,7 +367,6 @@ export default function App() {
         });
       }
 
-      // Fetch base64 for images if missing
       const updatedLogos = await Promise.all(currentLogos.map(async (logo) => {
         if (!logo.dataUrl && logo.src) {
           const dataUrl = await fetchImageAsBase64(logo.src);
@@ -359,7 +379,6 @@ export default function App() {
     };
     loadLogos();
 
-    // Check for draft report in progress
     const savedDraft = localStorage.getItem('mic_report_draft');
     if (savedDraft) {
       const parsedDraft = JSON.parse(savedDraft);
@@ -393,13 +412,13 @@ export default function App() {
   }, [formData.startTime, formData.duration]);
 
   // Toast System
-  const showToast = (message) => {
+  const showToast = useCallback((message) => {
     const id = Date.now();
     setToasts(prev => [...prev, { id, message }]);
     setTimeout(() => {
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
-  };
+  }, []);
 
   const calculateEndTime = (start, dur) => {
     if (!start || !dur) return '';
@@ -443,7 +462,7 @@ export default function App() {
   };
 
   // Auth Action
-  const handleLogin = (e) => {
+  const handleLogin = useCallback((e) => {
     e.preventDefault();
     if (username === 'admin' && password === 'admin6767') {
       setUserRole('admin');
@@ -466,9 +485,9 @@ export default function App() {
     } else {
       showToast('Invalid username or password');
     }
-  };
+  }, [username, password, navigate, showToast]);
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     setUserRole(null);
     sessionStorage.removeItem('mic_user_role');
     sessionStorage.removeItem('mic_username');
@@ -477,9 +496,9 @@ export default function App() {
     setView('landing');
     navigate('/');
     showToast('Logged out successfully');
-  };
+  }, [navigate, showToast]);
 
-  const discardDraft = () => {
+  const discardDraft = useCallback(() => {
     if (window.confirm('Are you sure you want to discard this report? All unsaved progress will be lost.')) {
       localStorage.removeItem('mic_report_draft');
       setFormData({
@@ -509,10 +528,18 @@ export default function App() {
       setView('landing');
       showToast('Draft discarded');
     }
-  };
+  }, [showToast]);
+
+  // Dynamic lists from Convex or local fallback (memoized)
+  const coordinatorsList = useMemo(() => convexDb ? convexDb.coordinators : coordinators, [convexDb, coordinators]);
+  const venuesRaw = useMemo(() => convexDb ? convexDb.venues : venues, [convexDb, venues]);
+  const venuesList = useMemo(() => convexDb ? convexDb.venues.map(v => typeof v === 'object' ? v.name : v) : venues, [convexDb, venues]);
+  const eventTypesRaw = useMemo(() => convexDb ? convexDb.eventTypes : eventTypes, [convexDb, eventTypes]);
+  const eventTypesList = useMemo(() => convexDb ? convexDb.eventTypes.map(t => typeof t === 'object' ? t.name : t) : eventTypes, [convexDb, eventTypes]);
+  const uploadedReportsList = useMemo(() => convexDb ? convexDb.uploadedReports : uploadedReports, [convexDb, uploadedReports]);
 
   // Generation of docx template
-  const generateDocxFile = async () => {
+  const generateDocxFile = useCallback(async () => {
     try {
       let buffer;
       const savedTemplate = localStorage.getItem('mic_custom_template') || customTemplate;
@@ -530,7 +557,6 @@ export default function App() {
         linebreaks: true,
       });
 
-      // Fetch details of coordinators
       const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
       const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
 
@@ -572,7 +598,6 @@ export default function App() {
         revenue: formData.financeEnabled ? formData.finance.revenue : '',
         remarks: formData.financeEnabled ? formData.finance.remarks : '',
 
-        // Image text placeholders
         brochure_img: formData.brochureImage ? '[Event Brochure / Flyer Attached]' : '[No Brochure Flyer Attached]',
         images: formData.images && formData.images.length > 0 
           ? formData.images.map((_, i) => ({ img: `[Event Execution Photo ${i + 1} Attached]` })) 
@@ -588,27 +613,52 @@ export default function App() {
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       });
 
+      // Save report output to database (utilizing Convex to the max!)
+      const title = formData.eventTitle || 'Event Report';
+      const fileName = `${(formData.eventTitle || 'event').toLowerCase().replace(/\s+/g, '_')}_report.docx`;
+      
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64 = reader.result.split(',')[1];
+        if (convexDb) {
+          await convexDb.addReport(title, formData.eventType, formData.startDate, fileName, base64);
+        } else {
+          const newReport = {
+            id: Date.now(),
+            eventName: title,
+            filename: fileName,
+            uploadDate: new Date().toLocaleDateString(),
+            status: 'Saved',
+            fileData: base64
+          };
+          setUploadedReports(prev => {
+            const updated = [...prev, newReport];
+            localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+            return updated;
+          });
+        }
+      };
+      reader.readAsDataURL(out);
+
       const url = URL.createObjectURL(out);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${(formData.eventTitle || 'event').toLowerCase().replace(/\s+/g, '_')}_report.docx`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-      showToast('Report downloaded.');
+      showToast('Report generated & saved to database.');
     } catch (e) {
-      console.error(e);
       showToast('DOCX generation error: ' + e.message);
     }
-  };
+  }, [formData, coordinatorsList, convexDb, showToast]);
 
   // Generate beautiful HTML-based Word Doc (preserves images perfectly)
-  const generateRichWordDoc = () => {
+  const generateRichWordDoc = useCallback(() => {
     const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
     const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
     
-    // Logos table html
     const activeOptionalLogos = logos.filter(l => l.isOptional && formData.selectedLogos.includes(l.id));
     const leftLogo = logos.find(l => l.id === 'vitc');
     const centerLogo = logos.find(l => l.id === 'mic');
@@ -822,11 +872,9 @@ export default function App() {
               Signature of the Coordinator
             </td>
             <td>
-              <!-- Blank for Student Welfare -->
               Signature of Asst. Director Student Welfare
             </td>
             <td>
-              <!-- Blank for Dean -->
               Signature of Dean / Director
             </td>
           </tr>
@@ -836,24 +884,50 @@ export default function App() {
     `;
 
     const blob = new Blob(['\ufeff' + docHtml], { type: 'application/msword' });
+    const title = formData.eventTitle || 'Event Report';
+    const fileName = `${(formData.eventTitle || 'event').toLowerCase().replace(/\s+/g, '_')}_report.doc`;
+
+    // Save report output to database (utilizing Convex to the max!)
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = reader.result.split(',')[1];
+      if (convexDb) {
+        await convexDb.addReport(title, formData.eventType, formData.startDate, fileName, base64);
+      } else {
+        const newReport = {
+          id: Date.now(),
+          eventName: title,
+          filename: fileName,
+          uploadDate: new Date().toLocaleDateString(),
+          status: 'Saved',
+          fileData: base64
+        };
+        setUploadedReports(prev => {
+          const updated = [...prev, newReport];
+          localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+          return updated;
+        });
+      }
+    };
+    reader.readAsDataURL(blob);
+
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `${(formData.eventTitle || 'event').toLowerCase().replace(/\s+/g, '_')}_report.doc`;
+    link.download = fileName;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showToast('Full report downloaded.');
-  };
+    showToast('Full report generated & saved to database.');
+  }, [formData, coordinatorsList, logos, convexDb, showToast]);
 
   // Direct completed report upload
-  const handleCompletedReportUpload = async (e) => {
+  const handleCompletedReportUpload = useCallback(async (e) => {
     const file = e.target.files?.[0];
     const eventName = prompt('Enter the Event Name for this report:');
     if (!file || !eventName) return;
 
-    // Normalize filename
     const cleanName = eventName
       .toLowerCase()
       .trim()
@@ -872,30 +946,34 @@ export default function App() {
         status: 'Pending Review',
         fileData: 'base64_simulated_contents'
       };
-      const updated = [...uploadedReports, newReport];
-      setUploadedReports(updated);
-      localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+      setUploadedReports(prev => {
+        const updated = [...prev, newReport];
+        localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+        return updated;
+      });
     }
     showToast(`Report uploaded and saved as ${newFilename}`);
     if (docxInputRef.current) docxInputRef.current.value = '';
-  };
+  }, [convexDb, showToast]);
 
-  const deleteReport = async (rep) => {
+  const deleteReport = useCallback(async (rep) => {
     if (window.confirm('Are you sure you want to delete this report?')) {
       const id = rep.id || rep._id;
       if (convexDb) {
         await convexDb.removeReport(id);
       } else {
-        const updated = uploadedReports.filter(r => r.id !== id);
-        setUploadedReports(updated);
-        localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+        setUploadedReports(prev => {
+          const updated = prev.filter(r => r.id !== id);
+          localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+          return updated;
+        });
       }
       showToast('Report deleted.');
     }
-  };
+  }, [convexDb, showToast]);
 
   // Add faculty coordinator in admin panel
-  const handleAddFaculty = async (e) => {
+  const handleAddFaculty = useCallback(async (e) => {
     e.preventDefault();
     if (!newFaculty.empId || !newFaculty.name || !newFaculty.department) {
       showToast('Please fill all fields');
@@ -905,16 +983,18 @@ export default function App() {
     if (convexDb) {
       await convexDb.addCoordinator(newFaculty.empId, newFaculty.name, newFaculty.department, newFaculty.signature || '');
     } else {
-      const updated = [...coordinators, newFaculty];
-      setCoordinators(updated);
-      localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+      setCoordinators(prev => {
+        const updated = [...prev, newFaculty];
+        localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+        return updated;
+      });
     }
     setNewFaculty({ empId: '', name: '', department: '', signature: '' });
     showToast('Faculty coordinator added');
     if (facSigInputRef.current) facSigInputRef.current.value = '';
-  };
+  }, [newFaculty, convexDb, showToast]);
 
-  const handleFacultySignatureUpload = (e) => {
+  const handleFacultySignatureUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -923,78 +1003,88 @@ export default function App() {
       };
       reader.readAsDataURL(file);
     }
-  };
+  }, []);
 
-  const deleteFaculty = async (coord) => {
+  const deleteFaculty = useCallback(async (coord) => {
     if (window.confirm('Delete this coordinator?')) {
       if (convexDb) {
         await convexDb.removeCoordinator(coord._id);
       } else {
-        const updated = coordinators.filter(c => c.empId !== coord.empId);
-        setCoordinators(updated);
-        localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+        setCoordinators(prev => {
+          const updated = prev.filter(c => c.empId !== coord.empId);
+          localStorage.setItem('mic_coordinators', JSON.stringify(updated));
+          return updated;
+        });
       }
       showToast('Faculty coordinator deleted');
     }
-  };
+  }, [convexDb, showToast]);
 
   // Config adjustments in admin panel
-  const addVenue = async () => {
+  const addVenue = useCallback(async () => {
     if (newVenue.trim() && !venuesList.includes(newVenue.trim())) {
       if (convexDb) {
         await convexDb.addVenue(newVenue.trim());
       } else {
-        const updated = [...venues, newVenue.trim()];
-        setVenues(updated);
-        localStorage.setItem('mic_venues', JSON.stringify(updated));
+        setVenues(prev => {
+          const updated = [...prev, newVenue.trim()];
+          localStorage.setItem('mic_venues', JSON.stringify(updated));
+          return updated;
+        });
       }
       setNewVenue('');
       showToast('Venue added');
     }
-  };
+  }, [newVenue, venuesList, convexDb, showToast]);
 
-  const deleteVenue = async (venue) => {
+  const deleteVenue = useCallback(async (venue) => {
     if (window.confirm(`Delete venue "${typeof venue === 'object' ? venue.name : venue}"?`)) {
       if (convexDb) {
         await convexDb.removeVenue(venue._id);
       } else {
-        const updated = venues.filter(v => v !== venue);
-        setVenues(updated);
-        localStorage.setItem('mic_venues', JSON.stringify(updated));
+        setVenues(prev => {
+          const updated = prev.filter(v => v !== venue);
+          localStorage.setItem('mic_venues', JSON.stringify(updated));
+          return updated;
+        });
       }
       showToast('Venue deleted');
     }
-  };
+  }, [convexDb, showToast]);
 
-  const addEventType = async () => {
+  const addEventType = useCallback(async () => {
     if (newEventType.trim() && !eventTypesList.includes(newEventType.trim())) {
       if (convexDb) {
         await convexDb.addEventType(newEventType.trim());
       } else {
-        const updated = [...eventTypes, newEventType.trim()];
-        setEventTypes(updated);
-        localStorage.setItem('mic_event_types', JSON.stringify(updated));
+        setEventTypes(prev => {
+          const updated = [...prev, newEventType.trim()];
+          localStorage.setItem('mic_event_types', JSON.stringify(updated));
+          return updated;
+        });
       }
       setNewEventType('');
       showToast('Event type added');
     }
-  };
+  }, [newEventType, eventTypesList, convexDb, showToast]);
 
-  const deleteEventType = async (type) => {
+  const deleteEventType = useCallback(async (type) => {
     if (window.confirm(`Delete event type "${typeof type === 'object' ? type.name : type}"?`)) {
       if (convexDb) {
         await convexDb.removeEventType(type._id);
       } else {
-        const updated = eventTypes.filter(t => t !== type);
-        setEventTypes(updated);
-        localStorage.setItem('mic_event_types', JSON.stringify(updated));
+        setEventTypes(prev => {
+          const updated = prev.filter(t => t !== type);
+          localStorage.setItem('mic_event_types', JSON.stringify(updated));
+          return updated;
+        });
       }
       showToast('Event type deleted');
     }
-  };
+  }, [convexDb, showToast]);
 
   // Replaced template upload
-  const handleTemplateUpload = (e) => {
+  const handleTemplateUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -1007,10 +1097,10 @@ export default function App() {
       reader.readAsArrayBuffer(file);
       if (templateInputRef.current) templateInputRef.current.value = '';
     }
-  };
+  }, [showToast]);
 
   // Logo uploads and deletion
-  const handleLogoUpload = (e) => {
+  const handleLogoUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (file) {
       const name = prompt('Enter a display name for this logo:');
@@ -1026,29 +1116,33 @@ export default function App() {
           src: '',
           dataUrl: base64
         };
-        const updated = [...logos, newLogo];
-        setLogos(updated);
-        localStorage.setItem('mic_logos', JSON.stringify(updated));
+        setLogos(prev => {
+          const updated = [...prev, newLogo];
+          localStorage.setItem('mic_logos', JSON.stringify(updated));
+          return updated;
+        });
         showToast(`Logo "${name}" uploaded successfully.`);
       };
       reader.readAsDataURL(file);
     }
     if (logoInputRef.current) logoInputRef.current.value = '';
-  };
+  }, [showToast]);
 
-  const deleteLogo = (id) => {
+  const deleteLogo = useCallback((id) => {
     const logoToDelete = logos.find(l => l.id === id);
     if (!logoToDelete) return;
     if (window.confirm(`Are you sure you want to delete the logo "${logoToDelete.name}"?`)) {
-      const updated = logos.filter(l => l.id !== id);
-      setLogos(updated);
-      localStorage.setItem('mic_logos', JSON.stringify(updated));
+      setLogos(prev => {
+        const updated = prev.filter(l => l.id !== id);
+        localStorage.setItem('mic_logos', JSON.stringify(updated));
+        return updated;
+      });
       showToast(`Logo "${logoToDelete.name}" deleted.`);
     }
-  };
+  }, [logos, showToast]);
 
   // Upload brochure handler
-  const handleBrochureUpload = (e) => {
+  const handleBrochureUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
@@ -1058,10 +1152,10 @@ export default function App() {
       };
       reader.readAsDataURL(file);
     }
-  };
+  }, [showToast]);
 
   // Upload event photos handler
-  const handleImagesUpload = (e) => {
+  const handleImagesUpload = useCallback((e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
@@ -1073,12 +1167,16 @@ export default function App() {
       reader.readAsDataURL(file);
     });
     showToast(`${files.length} photo(s) selected.`);
-  };
+  }, [showToast]);
 
   // Refine description with Groq LLM
-  const handleRefineReportText = async () => {
+  const handleRefineReportText = useCallback(async () => {
     if (!formData.description.trim()) {
       showToast('Please write some content first');
+      return;
+    }
+    if (!GROQ_API_KEY) {
+      showToast('Groq API Key is not configured. Please set VITE_GROQ_API_KEY in your environment.');
       return;
     }
     
@@ -1113,20 +1211,19 @@ ${formData.description}`;
       setRefinedText(text);
       setShowRefineModal(true);
     } catch (e) {
-      console.error(e);
       showToast('Couldn\'t reach Groq. Text left as-is.');
       setRefinedText(formData.description);
       setShowRefineModal(true);
     } finally {
       setRefinementLoading(false);
     }
-  };
+  }, [formData.description, showToast]);
 
-  const applyRefinedText = () => {
+  const applyRefinedText = useCallback(() => {
     setFormData(prev => ({ ...prev, description: refinedText }));
     setShowRefineModal(false);
     showToast('Write-up updated.');
-  };
+  }, [refinedText, showToast]);
 
   // Text-To-Speech helper
   const speakOutLoud = (text) => {
@@ -1139,38 +1236,13 @@ ${formData.description}`;
     }
   };
 
-  // Missing fields helper for voice flows
-  const getMissingMandatoryFields = (data) => {
-    const missing = [];
-    if (!data.eventType) missing.push('eventType');
-    if (!data.eventTitle.trim()) missing.push('eventTitle');
-    if (!data.startDate) missing.push('startDate');
-    if (!data.endDate) missing.push('endDate');
-    if (!data.startTime.trim()) missing.push('startTime');
-    if (!data.duration.trim()) missing.push('duration');
-    if (!data.venue) missing.push('venue');
-    if ((data.venue === 'Classroom' || data.venue === 'Other') && !data.customVenue.trim()) {
-      missing.push('customVenue');
-    }
-    if (!data.coord1) missing.push('coord1');
-    return missing;
-  };
-
-  const fieldQuestions = {
-    eventType: "What is the event type? Choose workshop, competition, hackathon, guest lecture, seminar, symposium, conference, or value added session.",
-    eventTitle: "What is the title of the event?",
-    startDate: "What is the start date of the event?",
-    endDate: "What is the end date of the event?",
-    startTime: "What is the start time of the event? For example, ten A M or two P M.",
-    duration: "What is the duration of the event? For example, ninety minutes or three hours.",
-    venue: "What is the venue? MG Auditorium, Kasturba Auditorium, Kamaraj Auditorium, Netaji Auditorium, VOC Auditorium, Classroom, or Online.",
-    customVenue: "Could you specify the custom venue or classroom name?",
-    coord1: "Which faculty coordinator is managing this event?"
-  };
-
   // Smart Fill description parsing
-  const handleSmartFill = async (text, isVoiceFlow = false) => {
+  const handleSmartFill = useCallback(async (text, isVoiceFlow = false) => {
     if (!text.trim()) return;
+    if (!GROQ_API_KEY) {
+      showToast('Groq API Key is not configured. Please set VITE_GROQ_API_KEY in your environment.');
+      return;
+    }
     setSmartFillLoading(true);
     try {
       const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -1297,16 +1369,19 @@ ${text}`;
         }
       }
     } catch (e) {
-      console.error(e);
       showToast("Couldn't reach Groq. Try again.");
     } finally {
       setSmartFillLoading(false);
     }
-  };
+  }, [eventTypesList, venuesList, showToast]);
 
   // Parse voice answer for a single prompt field
-  const handleSmartFillAnswer = async (answerText) => {
+  const handleSmartFillAnswer = useCallback(async (answerText) => {
     if (!answerText.trim() || !smartFillActiveField) return;
+    if (!GROQ_API_KEY) {
+      showToast('Groq API Key is not configured. Please set VITE_GROQ_API_KEY in your environment.');
+      return;
+    }
     setSmartFillLoading(true);
     stopListening();
     try {
@@ -1386,14 +1461,13 @@ Rules:
         showToast('Smart Fill voice flow complete!');
       }
     } catch (e) {
-      console.error(e);
       showToast("Error processing voice answer.");
     } finally {
       setSmartFillLoading(false);
     }
-  };
+  }, [smartFillActiveField, eventTypesList, venuesList, showToast]);
 
-  const finishVoiceFlowManually = () => {
+  const finishVoiceFlowManually = useCallback(() => {
     stopListening();
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
@@ -1407,7 +1481,7 @@ Rules:
     setView('create');
     setStep(1);
     showToast('Voice flow ended. Please review the form.');
-  };
+  }, [formData, showToast]);
 
   // Voice recognition - start listening
   const startListening = () => {
@@ -1444,7 +1518,6 @@ Rules:
     };
 
     recognition.onerror = (e) => {
-      console.error('Speech recognition error:', e.error);
       if (e.error !== 'no-speech') {
         setIsListening(false);
       }
@@ -1464,7 +1537,7 @@ Rules:
   };
 
   // CSV uploaded mapper handler
-  const handleCSVUpload = (e) => {
+  const handleCSVUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -1479,13 +1552,11 @@ Rules:
           return;
         }
 
-        // Map column headers
         const headers = Object.keys(rows[0]);
         let nameCol = headers.find(h => ['name', 'student name', 'full name', 'participant name'].includes(h.toLowerCase().trim()));
         let regCol = headers.find(h => ['reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id'].includes(h.toLowerCase().trim()));
         
         if (!nameCol || !regCol) {
-          // Fallback guess first two cols
           nameCol = headers[1] || headers[0];
           regCol = headers[0];
         }
@@ -1505,7 +1576,7 @@ Rules:
             name: (r[nameCol] || '').toString().trim(),
             type: type
           };
-        }).filter(item => item.name); // Filter out blank name rows
+        }).filter(item => item.name);
 
         setFormData(prev => ({
           ...prev,
@@ -1519,14 +1590,17 @@ Rules:
       }
     });
     if (csvInputRef.current) csvInputRef.current.value = '';
-  };
+  }, [showToast]);
 
-  const coordinatorsList = convexDb ? convexDb.coordinators : coordinators;
-  const venuesRaw = convexDb ? convexDb.venues : venues;
-  const venuesList = convexDb ? convexDb.venues.map(v => typeof v === 'object' ? v.name : v) : venues;
-  const eventTypesRaw = convexDb ? convexDb.eventTypes : eventTypes;
-  const eventTypesList = convexDb ? convexDb.eventTypes.map(t => typeof t === 'object' ? t.name : t) : eventTypes;
-  const uploadedReportsList = convexDb ? convexDb.uploadedReports : uploadedReports;
+  // Full-screen spinner while Convex initial data is loading
+  if (isConvexEnabled && !convexDb) {
+    return (
+      <div className="full-screen-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 16 }}>
+        <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)' }} />
+        <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>Connecting to Convex cloud...</span>
+      </div>
+    );
+  }
 
   // Render variables
   const mainContent = (
@@ -1539,6 +1613,20 @@ Rules:
           {userRole === 'admin' && <span className="badge badge-info" style={{ marginLeft: 8 }}>Admin Workspace</span>}
         </div>
         <div className="top-nav-actions">
+          {/* Online/Offline status indicator */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 12 }}>
+            <span style={{ 
+              width: 8, 
+              height: 8, 
+              borderRadius: '50%', 
+              backgroundColor: isOnline ? '#10b981' : '#ef4444',
+              display: 'inline-block' 
+            }} />
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 500 }}>
+              {isOnline ? 'Online' : 'Offline Mode'}
+            </span>
+          </div>
+
           {/* Theme picker */}
           <div className="accent-picker">
             {accentColors.map(color => (
@@ -1578,121 +1666,123 @@ Rules:
 
       {/* Main layout */}
       <main className="main-content">
-        {!userRole ? (
-          <LoginCard 
-            username={username}
-            setUsername={setUsername}
-            password={password}
-            setPassword={setPassword}
-            handleLogin={handleLogin}
-          />
-        ) : (
-          <>
-            {/* VIEW: PORTAL/LANDING for logged-in user at root path */}
-            {currentPath === '/' && (
-              userRole === 'admin' ? navigate('/admin') : navigate('/user')
-            )}
+        <React.Suspense fallback={<LoadingFallback />}>
+          {!userRole ? (
+            <LoginCard 
+              username={username}
+              setUsername={setUsername}
+              password={password}
+              setPassword={setPassword}
+              handleLogin={handleLogin}
+            />
+          ) : (
+            <>
+              {/* VIEW: PORTAL/LANDING for logged-in user at root path */}
+              {currentPath === '/' && (
+                userRole === 'admin' ? navigate('/admin') : navigate('/user')
+              )}
 
-            {/* VIEW: ADMIN INTERFACE */}
-            {(currentPath === '/admin' || currentPath === '/mic') && userRole === 'admin' && (
-              <AdminPanel
-                adminSection={adminSection}
-                setAdminSection={setAdminSection}
-                uploadedReports={uploadedReports}
-                uploadedReportsList={uploadedReportsList}
-                deleteReport={deleteReport}
-                coordinators={coordinators}
-                coordinatorsList={coordinatorsList}
-                newFaculty={newFaculty}
-                setNewFaculty={setNewFaculty}
-                handleAddFaculty={handleAddFaculty}
-                facSigInputRef={facSigInputRef}
-                handleFacultySignatureUpload={handleFacultySignatureUpload}
-                deleteFaculty={deleteFaculty}
-                newVenue={newVenue}
-                setNewVenue={setNewVenue}
-                addVenue={addVenue}
-                venuesRaw={venuesRaw}
-                deleteVenue={deleteVenue}
-                newEventType={newEventType}
-                setNewEventType={setNewEventType}
-                addEventType={addEventType}
-                eventTypesRaw={eventTypesRaw}
-                deleteEventType={deleteEventType}
-                templateInputRef={templateInputRef}
-                handleTemplateUpload={handleTemplateUpload}
-                logos={logos}
-                logoInputRef={logoInputRef}
-                handleLogoUpload={handleLogoUpload}
-                deleteLogo={deleteLogo}
-                showToast={showToast}
-              />
-            )}
+              {/* VIEW: ADMIN INTERFACE */}
+              {(currentPath === '/admin' || currentPath === '/mic') && userRole === 'admin' && (
+                <AdminPanel
+                  adminSection={adminSection}
+                  setAdminSection={setAdminSection}
+                  uploadedReports={uploadedReports}
+                  uploadedReportsList={uploadedReportsList}
+                  deleteReport={deleteReport}
+                  coordinators={coordinators}
+                  coordinatorsList={coordinatorsList}
+                  newFaculty={newFaculty}
+                  setNewFaculty={setNewFaculty}
+                  handleAddFaculty={handleAddFaculty}
+                  facSigInputRef={facSigInputRef}
+                  handleFacultySignatureUpload={handleFacultySignatureUpload}
+                  deleteFaculty={deleteFaculty}
+                  newVenue={newVenue}
+                  setNewVenue={setNewVenue}
+                  addVenue={addVenue}
+                  venuesRaw={venuesRaw}
+                  deleteVenue={deleteVenue}
+                  newEventType={newEventType}
+                  setNewEventType={setNewEventType}
+                  addEventType={addEventType}
+                  eventTypesRaw={eventTypesRaw}
+                  deleteEventType={deleteEventType}
+                  templateInputRef={templateInputRef}
+                  handleTemplateUpload={handleTemplateUpload}
+                  logos={logos}
+                  logoInputRef={logoInputRef}
+                  handleLogoUpload={handleLogoUpload}
+                  deleteLogo={deleteLogo}
+                  showToast={showToast}
+                />
+              )}
 
-            {/* VIEW: COORDINATOR WORKSPACE (Path /user) */}
-            {currentPath === '/user' && (
-              <>
-                {view === 'landing' && (
-                  <CoordinatorLanding
-                    setView={setView}
-                    docxInputRef={docxInputRef}
-                    handleCompletedReportUpload={handleCompletedReportUpload}
-                  />
-                )}
+              {/* VIEW: COORDINATOR WORKSPACE (Path /user) */}
+              {currentPath === '/user' && (
+                <>
+                  {view === 'landing' && (
+                    <CoordinatorLanding
+                      setView={setView}
+                      docxInputRef={docxInputRef}
+                      handleCompletedReportUpload={handleCompletedReportUpload}
+                    />
+                  )}
 
-                {view === 'create' && (
-                  <ReportWizard
-                    formData={formData}
-                    setFormData={setFormData}
-                    step={step}
-                    setStep={setStep}
-                    setView={setView}
-                    validationErrors={validationErrors}
-                    setValidationErrors={setValidationErrors}
-                    coordinatorsList={coordinatorsList}
-                    venuesList={venuesList}
-                    eventTypesList={eventTypesList}
-                    smartFillFlags={smartFillFlags}
-                    refinementLoading={refinementLoading}
-                    handleRefineReportText={handleRefineReportText}
-                    csvInputRef={csvInputRef}
-                    handleCSVUpload={handleCSVUpload}
-                    csvErrors={csvErrors}
-                    brochureInputRef={brochureInputRef}
-                    handleBrochureUpload={handleBrochureUpload}
-                    imagesInputRef={imagesInputRef}
-                    handleImagesUpload={handleImagesUpload}
-                    discardDraft={discardDraft}
-                    showToast={showToast}
-                    logos={logos}
-                  />
-                )}
+                  {view === 'create' && (
+                    <ReportWizard
+                      formData={formData}
+                      setFormData={setFormData}
+                      step={step}
+                      setStep={setStep}
+                      setView={setView}
+                      validationErrors={validationErrors}
+                      setValidationErrors={setValidationErrors}
+                      coordinatorsList={coordinatorsList}
+                      venuesList={venuesList}
+                      eventTypesList={eventTypesList}
+                      smartFillFlags={smartFillFlags}
+                      refinementLoading={refinementLoading}
+                      handleRefineReportText={handleRefineReportText}
+                      csvInputRef={csvInputRef}
+                      handleCSVUpload={handleCSVUpload}
+                      csvErrors={csvErrors}
+                      brochureInputRef={brochureInputRef}
+                      handleBrochureUpload={handleBrochureUpload}
+                      imagesInputRef={imagesInputRef}
+                      handleImagesUpload={handleImagesUpload}
+                      discardDraft={discardDraft}
+                      showToast={showToast}
+                      logos={logos}
+                    />
+                  )}
 
-                {view === 'review' && (
-                  <ReviewSummary
-                    formData={formData}
-                    setFormData={setFormData}
-                    setView={setView}
-                    setStep={setStep}
-                    coordinators={coordinatorsList}
-                    discardDraft={discardDraft}
-                  />
-                )}
+                  {view === 'review' && (
+                    <ReviewSummary
+                      formData={formData}
+                      setFormData={setFormData}
+                      setView={setView}
+                      setStep={setStep}
+                      coordinators={coordinatorsList}
+                      discardDraft={discardDraft}
+                    />
+                  )}
 
-                {view === 'preview' && (
-                  <DocumentPreview
-                    formData={formData}
-                    setView={setView}
-                    generateDocxFile={generateDocxFile}
-                    generateRichWordDoc={generateRichWordDoc}
-                    coordinators={coordinatorsList}
-                    logos={logos}
-                  />
-                )}
-              </>
-            )}
-          </>
-        )}
+                  {view === 'preview' && (
+                    <DocumentPreview
+                      formData={formData}
+                      setView={setView}
+                      generateDocxFile={generateDocxFile}
+                      generateRichWordDoc={generateRichWordDoc}
+                      coordinators={coordinatorsList}
+                      logos={logos}
+                    />
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </React.Suspense>
       </main>
 
       {/* Refined text comparison modal */}
