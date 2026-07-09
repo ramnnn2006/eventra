@@ -8,12 +8,39 @@ import Papa from 'papaparse';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
+
+const escapeHtml = (unsafe) => {
+  if (!unsafe) return '';
+  return String(unsafe)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+};
+
 export default function App() {
-  // Navigation & Auth
-  const [view, setView] = useState('login'); // login, landing, create, review, preview, admin
-  const [userRole, setUserRole] = useState(null); // user, admin
+  // Navigation & Auth (Session persisted via sessionStorage)
+  const [currentPath, setCurrentPath] = useState(window.location.pathname);
+  const [userRole, setUserRole] = useState(() => sessionStorage.getItem('mic_user_role') || null);
+  const [view, setView] = useState('landing'); // landing, create, review, preview
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+
+  // Sync state on popstate navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentPath(window.location.pathname);
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
+  const navigate = (path) => {
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+  };
   
   // Theme state
   const [accent, setAccent] = useState({ name: 'teal', h: 170, s: 75, l: 35 });
@@ -214,24 +241,41 @@ export default function App() {
   // Auth Action
   const handleLogin = (e) => {
     e.preventDefault();
-    if (username === 'admin' && password === 'admin6767') {
-      setUserRole('admin');
-      setView('admin');
-      showToast('Logged in as administrator');
-    } else if (username === 'user' && password === 'user123') {
-      setUserRole('user');
-      setView('landing');
-      showToast('Logged in as club coordinator');
+    if (currentPath === '/admin') {
+      if (username === 'admin' && password === 'admin6767') {
+        setUserRole('admin');
+        sessionStorage.setItem('mic_user_role', 'admin');
+        sessionStorage.setItem('mic_username', 'admin');
+        setView('admin');
+        setUsername('');
+        setPassword('');
+        showToast('Logged in as administrator');
+      } else {
+        showToast('Invalid administrator username or password');
+      }
     } else {
-      showToast('Invalid username or password');
+      if (username === 'user' && password === 'user123') {
+        setUserRole('user');
+        sessionStorage.setItem('mic_user_role', 'user');
+        sessionStorage.setItem('mic_username', 'user');
+        setView('landing');
+        setUsername('');
+        setPassword('');
+        showToast('Logged in as club coordinator');
+      } else {
+        showToast('Invalid coordinator username or password');
+      }
     }
   };
 
   const handleLogout = () => {
     setUserRole(null);
-    setView('login');
+    sessionStorage.removeItem('mic_user_role');
+    sessionStorage.removeItem('mic_username');
     setUsername('');
     setPassword('');
+    setView('landing');
+    navigate('/');
     showToast('Logged out successfully');
   };
 
@@ -607,23 +651,23 @@ ${formData.description}`;
         <table>
           <tr>
             <td width="30%"><b>Event type</b></td>
-            <td colspan="3">${formData.eventType || ''}</td>
+            <td colspan="3">${escapeHtml(formData.eventType || '')}</td>
           </tr>
           <tr>
             <td><b>Title of the event</b></td>
-            <td colspan="3">${formData.eventTitle || ''}</td>
+            <td colspan="3">${escapeHtml(formData.eventTitle || '')}</td>
           </tr>
           <tr>
             <td><b>Date (From – To)</b></td>
-            <td colspan="3">${formData.startDate || ''} to ${formData.endDate || ''}</td>
+            <td colspan="3">${escapeHtml(formData.startDate || '')} to ${escapeHtml(formData.endDate || '')}</td>
           </tr>
           <tr>
             <td><b>Time</b></td>
-            <td colspan="3">${formData.startTime || ''} (Duration: ${formData.duration || ''})</td>
+            <td colspan="3">${escapeHtml(formData.startTime || '')} (Duration: ${escapeHtml(formData.duration || '')})</td>
           </tr>
           <tr>
             <td><b>Venue</b></td>
-            <td colspan="3">${formData.venue === 'Classroom' || formData.venue === 'Other' ? formData.customVenue : formData.venue}</td>
+            <td colspan="3">${escapeHtml(formData.venue === 'Classroom' || formData.venue === 'Other' ? formData.customVenue : formData.venue)}</td>
           </tr>
           <tr>
             <td><b>No. of Participants</b></td>
@@ -636,39 +680,39 @@ ${formData.description}`;
             <td><b>Department</b></td>
           </tr>
           <tr>
-            <td>${f1 ? f1.empId : ''}</td>
-            <td>${f1 ? f1.name : ''}</td>
-            <td>${f1 ? f1.department : ''}</td>
+            <td>${f1 ? escapeHtml(f1.empId) : ''}</td>
+            <td>${f1 ? escapeHtml(f1.name) : ''}</td>
+            <td>${f1 ? escapeHtml(f1.department) : ''}</td>
           </tr>
           <tr>
-            <td>${f2 ? f2.empId : ''}</td>
-            <td>${f2 ? f2.name : ''}</td>
-            <td>${f2 ? f2.department : ''}</td>
+            <td>${f2 ? escapeHtml(f2.empId) : ''}</td>
+            <td>${f2 ? escapeHtml(f2.name) : ''}</td>
+            <td>${f2 ? escapeHtml(f2.department) : ''}</td>
           </tr>
           ${formData.resourcePersonEnabled ? `
           <tr>
             <td><b>Resource Person Name</b></td>
-            <td colspan="3">${formData.resourcePerson.name || ''}</td>
+            <td colspan="3">${escapeHtml(formData.resourcePerson.name || '')}</td>
           </tr>
           <tr>
             <td><b>Designation</b></td>
-            <td colspan="3">${formData.resourcePerson.designation || ''}</td>
+            <td colspan="3">${escapeHtml(formData.resourcePerson.designation || '')}</td>
           </tr>
           <tr>
             <td><b>Organization Details</b></td>
-            <td colspan="3">${formData.resourcePerson.organization || ''}</td>
+            <td colspan="3">${escapeHtml(formData.resourcePerson.organization || '')}</td>
           </tr>
           <tr>
             <td><b>Place</b></td>
-            <td colspan="3">${formData.resourcePerson.place || ''}</td>
+            <td colspan="3">${escapeHtml(formData.resourcePerson.place || '')}</td>
           </tr>
           <tr>
             <td><b>E-mail</b></td>
-            <td colspan="3">${formData.resourcePerson.email || ''}</td>
+            <td colspan="3">${escapeHtml(formData.resourcePerson.email || '')}</td>
           </tr>
           <tr>
             <td><b>Mobile no.</b></td>
-            <td colspan="3">${formData.resourcePerson.mobile || ''}</td>
+            <td colspan="3">${escapeHtml(formData.resourcePerson.mobile || '')}</td>
           </tr>
           ` : ''}
         </table>
@@ -683,9 +727,9 @@ ${formData.description}`;
           <div style="page-break-before: always;"></div>
         ` : ''}
 
-        <div class="title" style="margin-top: 20px;">A REPORT ON ${(formData.eventTitle || '').toUpperCase()}</div>
+        <div class="title" style="margin-top: 20px;">A REPORT ON ${escapeHtml(formData.eventTitle || '').toUpperCase()}</div>
         <div style="margin-top: 15px; text-align: justify;">
-          ${(formData.description || '').split('\n').map(p => `<p>${p}</p>`).join('')}
+          ${(formData.description || '').split('\n').map(p => `<p>${escapeHtml(p)}</p>`).join('')}
         </div>
 
         ${formData.images && formData.images.length > 0 ? `
@@ -694,7 +738,7 @@ ${formData.description}`;
             ${formData.images.map((img, i) => `
               <div class="image-container">
                 <img src="${img}" alt="Event Photo ${i+1}" />
-                <div style="font-size: 9pt; margin-top: 5px;">Photo ${i+1}: Event execution. Date: ${formData.startDate || ''}</div>
+                <div style="font-size: 9pt; margin-top: 5px;">Photo ${i+1}: Event execution. Date: ${escapeHtml(formData.startDate || '')}</div>
               </div>
             `).join('')}
           </div>
@@ -704,8 +748,8 @@ ${formData.description}`;
 
         <div class="section-title">Attendance</div>
         <div class="subtitle" style="text-align: left; margin-bottom: 10px;">
-          <b>Event Name:</b> ${formData.eventTitle || ''}<br/>
-          <b>Date:</b> ${formData.startDate || ''}
+          <b>Event Name:</b> ${escapeHtml(formData.eventTitle || '')}<br/>
+          <b>Date:</b> ${escapeHtml(formData.startDate || '')}
         </div>
         
         <table>
@@ -719,8 +763,8 @@ ${formData.description}`;
           ${formData.attendanceData.map((p, idx) => `
             <tr>
               <td>${idx + 1}</td>
-              <td>${p.regNo || ''}</td>
-              <td>${p.name || ''}</td>
+              <td>${escapeHtml(p.regNo || '')}</td>
+              <td>${escapeHtml(p.name || '')}</td>
               <td></td>
               <td>${p.type === 'Student' ? 'S' : p.type === 'Faculty' ? 'F' : p.type === 'External' ? 'E' : ''}</td>
             </tr>
@@ -737,9 +781,9 @@ ${formData.description}`;
               <th>Remarks</th>
             </tr>
             <tr>
-              <td>${formData.finance.expenditure || '0'}</td>
-              <td>${formData.finance.revenue || '0'}</td>
-              <td>${formData.finance.remarks || 'None'}</td>
+              <td>${escapeHtml(formData.finance.expenditure || '0')}</td>
+              <td>${escapeHtml(formData.finance.revenue || '0')}</td>
+              <td>${escapeHtml(formData.finance.remarks || 'None')}</td>
             </tr>
           </table>
         ` : ''}
@@ -857,7 +901,7 @@ ${formData.description}`;
   return (
     <div className="app-container">
       {/* Top navbar (if logged in) */}
-      {view !== 'login' && (
+      {userRole !== null && (
         <nav className="top-nav">
           <div className="top-nav-logo">
             <FileText size={18} className="text-muted" />
@@ -879,8 +923,8 @@ ${formData.description}`;
             
             {userRole === 'admin' ? (
               <>
-                <button className="btn btn-secondary" onClick={() => setView(view === 'admin' ? 'landing' : 'admin')}>
-                  {view === 'admin' ? 'Coordinators View' : 'Admin Workspace'}
+                <button className="btn btn-secondary" onClick={() => navigate(currentPath === '/admin' ? '/user' : '/admin')}>
+                  {currentPath === '/admin' ? 'Coordinators View' : 'Admin Panel'}
                 </button>
                 <button className="btn btn-link" onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <LogOut size={16} />
@@ -899,13 +943,139 @@ ${formData.description}`;
 
       {/* Main layout */}
       <main className="main-content">
-        {/* VIEW: LOGIN */}
-        {view === 'login' && (
+        {/* VIEW: PORTAL (Path /) */}
+        {currentPath === '/' && (
+          <div className="landing-split-container">
+            <div className="landing-left">
+              <div className="landing-mic-logo-row">
+                <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
+                <span className="landing-mic-tag">Microsoft Innovations Club</span>
+              </div>
+              <h1 className="landing-hero-title">MIC Event Portal</h1>
+              <p className="landing-hero-subtitle">
+                An elegant, automated writer to format event reports in VIT Chennai template. Access your workspace below.
+              </p>
+              <div className="landing-hero-actions">
+                <button className="btn btn-primary" onClick={() => navigate('/user')}>
+                  Coordinator Workspace
+                </button>
+                <button className="btn btn-secondary" onClick={() => navigate('/admin')}>
+                  Administrator Access
+                </button>
+              </div>
+            </div>
+            <div className="landing-right">
+              <div className="mic-silhouette-container">
+                <svg viewBox="0 0 400 400" className="mic-silhouette-svg">
+                  {/* Top Left Quadrant (dots) */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`tl-${r}-${c}`} 
+                        cx={50 + c * 16} 
+                        cy={50 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${(r + c) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+
+                  {/* Top Right Quadrant */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`tr-${r}-${c}`} 
+                        cx={210 + c * 16} 
+                        cy={50 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${(r + (7 - c)) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+
+                  {/* Bottom Left Quadrant */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`bl-${r}-${c}`} 
+                        cx={50 + c * 16} 
+                        cy={210 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${((7 - r) + c) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+
+                  {/* Bottom Right Quadrant */}
+                  {Array.from({ length: 8 }).map((_, r) => 
+                    Array.from({ length: 8 }).map((_, c) => (
+                      <circle 
+                        key={`br-${r}-${c}`} 
+                        cx={210 + c * 16} 
+                        cy={210 + r * 16} 
+                        r="3.5" 
+                        fill="var(--accent)" 
+                        className="silhouette-dot"
+                        style={{ animationDelay: `${((7 - r) + (7 - c)) * 0.1}s` }}
+                      />
+                    ))
+                  )}
+                </svg>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: ADMIN LOGIN (Path /admin, if not admin) */}
+        {currentPath === '/admin' && userRole !== 'admin' && (
           <div className="login-card">
             <div className="landing-illustration">
               <FileText size={32} style={{ color: 'var(--accent)' }} />
             </div>
-            <h2 className="login-title">MIC Event Report Generator</h2>
+            <h2 className="login-title">MIC Administrator Access</h2>
+            <form onSubmit={handleLogin}>
+              <div className="form-group">
+                <label className="form-label">Username</label>
+                <input 
+                  type="text" 
+                  className="form-input" 
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="Admin Username"
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Password</label>
+                <input 
+                  type="password" 
+                  className="form-input" 
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Admin Password"
+                  required
+                />
+              </div>
+              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }}>
+                Login to Admin Panel
+              </button>
+            </form>
+          </div>
+        )}
+
+        {/* VIEW: USER LOGIN (Path /user, if not logged in) */}
+        {currentPath === '/user' && userRole !== 'user' && userRole !== 'admin' && (
+          <div className="login-card">
+            <div className="landing-illustration">
+              <FileText size={32} style={{ color: 'var(--accent)' }} />
+            </div>
+            <h2 className="login-title">MIC Coordinator Access</h2>
             <form onSubmit={handleLogin}>
               <div className="form-group">
                 <label className="form-label">Username</label>
@@ -930,14 +1100,14 @@ ${formData.description}`;
                 />
               </div>
               <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }}>
-                Login
+                Login to Workspace
               </button>
             </form>
           </div>
         )}
 
-        {/* VIEW: LANDING */}
-        {view === 'landing' && (
+        {/* VIEW: COORDINATOR WORKSPACE LANDING (Path /user, logged in, landing view) */}
+        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'landing' && (
           <div className="landing-split-container">
             <div className="landing-left">
               <div className="landing-mic-logo-row">
@@ -1033,7 +1203,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: CREATE REPORT WIZARD */}
-        {view === 'create' && (
+        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'create' && (
           <div className="form-wizard">
             <div className="wizard-header">
               <span className="wizard-title">{formData.eventTitle || 'New Event Report'}</span>
@@ -1512,7 +1682,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: REVIEW & EDIT */}
-        {view === 'review' && (
+        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'review' && (
           <div className="review-container">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
               <h2>Review Event Details</h2>
@@ -1717,7 +1887,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: DOCUMENT PREVIEW */}
-        {view === 'preview' && (
+        {currentPath === '/user' && (userRole === 'user' || userRole === 'admin') && view === 'preview' && (
           <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
             <div className="preview-nav">
               <button className="btn btn-secondary" onClick={() => setView('review')} style={{ gap: 6 }}>
@@ -1935,7 +2105,7 @@ ${formData.description}`;
         )}
 
         {/* VIEW: ADMIN INTERFACE */}
-        {view === 'admin' && (
+        {currentPath === '/admin' && userRole === 'admin' && (
           <div className="admin-layout">
             <aside className="admin-sidebar">
               <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.2 }}>MIC Administration</h2>
