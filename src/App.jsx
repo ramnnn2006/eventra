@@ -531,6 +531,14 @@ ${formData.description}`;
         expenditure: formData.financeEnabled ? formData.finance.expenditure : '',
         revenue: formData.financeEnabled ? formData.finance.revenue : '',
         remarks: formData.financeEnabled ? formData.finance.remarks : '',
+
+        // Image text placeholders to prevent compilation issues
+        brochure_img: formData.brochureImage ? '[Event Brochure / Flyer Attached]' : '[No Brochure Flyer Attached]',
+        images: formData.images && formData.images.length > 0 
+          ? formData.images.map((_, i) => ({ img: `[Event Execution Photo ${i + 1} Attached]` })) 
+          : [{ img: '[No Event Execution Photos Attached]' }],
+        coord1_sig_image: f1 && f1.signature ? [{ coord1_sig_image: '[Faculty Coordinator 1 Signature Attached]' }] : [],
+        coord2_sig_image: f2 && f2.signature ? [{ coord2_sig_image: '[Faculty Coordinator 2 Signature Attached]' }] : []
       };
 
       doc.render(renderData);
