@@ -9,6 +9,15 @@ import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { useQuery, useMutation } from "convex/react";
 
+// Import modular components
+import LoginCard from './components/LoginCard';
+import PortalLanding from './components/PortalLanding';
+import CoordinatorLanding from './components/CoordinatorLanding';
+import ReportWizard from './components/ReportWizard';
+import ReviewSummary from './components/ReviewSummary';
+import DocumentPreview from './components/DocumentPreview';
+import AdminPanel from './components/AdminPanel';
+
 const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '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';
 
 const escapeHtml = (unsafe) => {
@@ -20,6 +29,43 @@ const escapeHtml = (unsafe) => {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#039;');
 };
+
+// base64/ArrayBuffer helpers
+function arrayBufferToBase64(buffer) {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToArrayBuffer(base64) {
+  const binary_string = window.atob(base64);
+  const len = binary_string.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binary_string.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
+async function fetchImageAsBase64(url) {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  } catch (e) {
+    console.error('Failed to fetch image as base64', url, e);
+    return null;
+  }
+}
 
 function ConvexWrapper({ children, setDb }) {
   const coordinators = useQuery("db:getCoordinators");
@@ -117,6 +163,8 @@ export default function App() {
   const [venues, setVenues] = useState([]);
   const [eventTypes, setEventTypes] = useState([]);
   const [uploadedReports, setUploadedReports] = useState([]);
+  const [logos, setLogos] = useState([]);
+  const [customTemplate, setCustomTemplate] = useState(null);
   
   // Form Wizard state
   const [step, setStep] = useState(1);
@@ -151,7 +199,8 @@ export default function App() {
       expenditure: '',
       revenue: '',
       remarks: ''
-    }
+    },
+    selectedLogos: [] // Selected optional logos list
   });
 
   // UI status
@@ -174,11 +223,10 @@ export default function App() {
   const [voiceSpeakPrompt, setVoiceSpeakPrompt] = useState('');
   
   // Admin editing states
-  const [adminSection, setAdminSection] = useState('reports'); // reports, faculty, config, template
+  const [adminSection, setAdminSection] = useState('reports'); // reports, faculty, config, template, logos
   const [newFaculty, setNewFaculty] = useState({ empId: '', name: '', department: '', signature: '' });
   const [newVenue, setNewVenue] = useState('');
   const [newEventType, setNewEventType] = useState('');
-  const [customTemplate, setCustomTemplate] = useState(null); // base64 custom template docx
   
   // File inputs references
   const brochureInputRef = useRef(null);
@@ -187,6 +235,7 @@ export default function App() {
   const docxInputRef = useRef(null);
   const facSigInputRef = useRef(null);
   const templateInputRef = useRef(null);
+  const logoInputRef = useRef(null);
   const recognitionRef = useRef(null);
 
   // Available accent colors
@@ -197,6 +246,20 @@ export default function App() {
     { name: 'rose', h: 350, s: 65, l: 45 },
     { name: 'charcoal', h: 220, s: 15, l: 35 }
   ];
+
+  // Role based redirection control
+  useEffect(() => {
+    if (userRole) {
+      if (currentPath === '/') {
+        navigate(userRole === 'admin' ? '/admin' : '/user');
+      } else if (currentPath === '/admin' || currentPath === '/mic') {
+        if (userRole !== 'admin') {
+          navigate('/user');
+          showToast('Access denied: Administrator role required');
+        }
+      }
+    }
+  }, [currentPath, userRole]);
 
   // Initialize data on mount
   useEffect(() => {
@@ -244,6 +307,57 @@ export default function App() {
     if (savedReports) {
       setUploadedReports(JSON.parse(savedReports));
     }
+
+    // Load custom template state
+    const savedTemplate = localStorage.getItem('mic_custom_template');
+    if (savedTemplate) {
+      setCustomTemplate(savedTemplate);
+    }
+
+    // Load and build logos list
+    const loadLogos = async () => {
+      const savedLogos = localStorage.getItem('mic_logos');
+      let currentLogos = [];
+      if (savedLogos) {
+        try {
+          currentLogos = JSON.parse(savedLogos);
+        } catch (e) {
+          currentLogos = [];
+        }
+      }
+      
+      const defaultLogos = [
+        { id: 'vitc', name: 'VIT Chennai', isOptional: false, src: '/vitclogo.png', dataUrl: '' },
+        { id: 'mic', name: 'Microsoft Innovations Club', isOptional: false, src: '/miclogo.png', dataUrl: '' },
+        { id: 'swc', name: 'Student Welfare', isOptional: false, src: '/swc.png', dataUrl: '' },
+        { id: 'iic', name: 'IIC', isOptional: true, src: '/iic.png', dataUrl: '' },
+        { id: 'mlsa', name: 'MLSA', isOptional: true, src: '/mlsa.png', dataUrl: '' },
+        { id: 'vnest', name: 'VNEST', isOptional: true, src: '/vnest.png', dataUrl: '' }
+      ];
+
+      if (currentLogos.length === 0) {
+        currentLogos = defaultLogos;
+      } else {
+        // Ensure default required logos are always present
+        defaultLogos.forEach(def => {
+          if (!currentLogos.some(l => l.id === def.id)) {
+            currentLogos.push(def);
+          }
+        });
+      }
+
+      // Fetch base64 for images if missing
+      const updatedLogos = await Promise.all(currentLogos.map(async (logo) => {
+        if (!logo.dataUrl && logo.src) {
+          const dataUrl = await fetchImageAsBase64(logo.src);
+          return { ...logo, dataUrl: dataUrl || '' };
+        }
+        return logo;
+      }));
+      setLogos(updatedLogos);
+      localStorage.setItem('mic_logos', JSON.stringify(updatedLogos));
+    };
+    loadLogos();
 
     // Check for draft report in progress
     const savedDraft = localStorage.getItem('mic_report_draft');
@@ -331,18 +445,26 @@ export default function App() {
   // Auth Action
   const handleLogin = (e) => {
     e.preventDefault();
-    if (currentPath === '/mic') {
-      if (username === 'admin' && password === 'admin6767') {
-        setUserRole('admin');
-        sessionStorage.setItem('mic_user_role', 'admin');
-        sessionStorage.setItem('mic_username', 'admin');
-        setView('admin');
-        setUsername('');
-        setPassword('');
-        showToast('Logged in as administrator');
-      } else {
-        showToast('Invalid administrator username or password');
-      }
+    if (username === 'admin' && password === 'admin6767') {
+      setUserRole('admin');
+      sessionStorage.setItem('mic_user_role', 'admin');
+      sessionStorage.setItem('mic_username', 'admin');
+      setView('landing');
+      setUsername('');
+      setPassword('');
+      showToast('Logged in as administrator');
+      navigate('/admin');
+    } else if (username === 'user' && password === 'user123') {
+      setUserRole('user');
+      sessionStorage.setItem('mic_user_role', 'user');
+      sessionStorage.setItem('mic_username', 'user');
+      setView('landing');
+      setUsername('');
+      setPassword('');
+      showToast('Logged in as club coordinator');
+      navigate('/user');
+    } else {
+      showToast('Invalid username or password');
     }
   };
 
@@ -357,559 +479,8 @@ export default function App() {
     showToast('Logged out successfully');
   };
 
-  // Image Optimization
-  const processImageFile = (file) => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 600;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height = Math.round(height * (MAX_WIDTH / width));
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width = Math.round(width * (MAX_HEIGHT / height));
-              height = MAX_HEIGHT;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.85));
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file);
-    });
-  };
-
-  // File Upload Handlers
-  const handleBrochureUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const optimized = await processImageFile(file);
-      setFormData(prev => ({ ...prev, brochureImage: optimized }));
-      showToast('Brochure image uploaded');
-    }
-  };
-
-  const handleImagesUpload = async (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length > 0) {
-      const newImages = [];
-      for (const file of files) {
-        const optimized = await processImageFile(file);
-        newImages.push(optimized);
-      }
-      setFormData(prev => ({ ...prev, images: [...prev.images, ...newImages] }));
-      showToast(`Added ${files.length} images`);
-    }
-  };
-
-  // CSV Parsing
-  const handleCSVUpload = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setFormData(prev => ({ ...prev, attendanceFileName: file.name }));
-
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const headers = results.meta.fields || [];
-        // Map headers automatically
-        const nameField = headers.find(h => {
-          const l = h.toLowerCase();
-          return l.includes('name') || l.includes('student name') || l.includes('full name');
-        });
-        const idField = headers.find(h => {
-          const l = h.toLowerCase();
-          return l.includes('reg') || l.includes('roll') || l.includes('id') || l.includes('no');
-        });
-
-        if (nameField && idField) {
-          const mapped = results.data.map(row => {
-            const rawId = row[idField] ? row[idField].trim() : '';
-            const rawName = row[nameField] ? row[nameField].trim() : '';
-            
-            // Determine type
-            let type = 'External';
-            if (rawId) {
-              const cleaned = rawId.replace(/[^a-zA-Z0-9]/g, '');
-              if (cleaned.length === 5 && /^\d+$/.test(cleaned)) {
-                type = 'Faculty';
-              } else if (cleaned.length >= 8 && /^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(cleaned.substring(0, 9))) {
-                type = 'Student';
-              } else if (/^[0-9]{2}[a-zA-Z]{2,3}[0-9]{4}/.test(cleaned)) {
-                type = 'Student';
-              }
-            } else {
-              type = '';
-            }
-
-            return {
-              regNo: rawId,
-              name: rawName,
-              type: type
-            };
-          });
-
-          setFormData(prev => ({ ...prev, attendanceData: mapped }));
-          setCsvErrors([]);
-          showToast(`${mapped.length} attendees loaded`);
-        } else {
-          setCsvErrors(['Could not auto-map columns. Please check your CSV column headers. Make sure there are columns like "Name" and "Registration Number".']);
-        }
-      },
-      error: (err) => {
-        setCsvErrors(['Error parsing CSV: ' + err.message]);
-      }
-    });
-  };
-
-  // Groq API Call
-  const handleRefineReportText = async () => {
-    if (!formData.description.trim()) {
-      showToast('Please write some content first');
-      return;
-    }
-    
-    setRefinementLoading(true);
-    try {
-      const prompt = `Clean up this event report. Fix grammar and make it read better.
-- Keep all facts, numbers, dates, names, and key outcomes.
-- Write like a normal person. No fancy words, no corporate speak, no filler.
-- Keep the length between 200 and 500 words.
-- Don't add headings, intros, markdown, or extra notes. Just give back the cleaned-up text.
-
-Report:
-${formData.description}`;
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer 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'
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.7
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error('API request failed');
-      }
-
-      const data = await response.json();
-      const text = data.choices[0].message.content.trim();
-      setRefinedText(text);
-      setShowRefineModal(true);
-    } catch (e) {
-      console.error(e);
-      showToast('Couldn\'t reach Groq. Text left as-is.');
-      // Local fallback simple polishing
-      setRefinedText(formData.description + "\n\n(Could not refine. Text unchanged.)");
-      setShowRefineModal(true);
-    } finally {
-      setRefinementLoading(false);
-    }
-  };
-
-  // Apply Refined Text
-  const applyRefinedText = () => {
-    setFormData(prev => ({ ...prev, description: refinedText }));
-    setShowRefineModal(false);
-    showToast('Write-up updated.');
-  };
-
-  // Text-To-Speech helper
-  const speakOutLoud = (text) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'en-IN';
-      window.speechSynthesis.speak(utterance);
-      setVoiceSpeakPrompt(text);
-    }
-  };
-
-  const getMissingMandatoryFields = (data) => {
-    const missing = [];
-    if (!data.eventType) missing.push('eventType');
-    if (!data.eventTitle || !data.eventTitle.trim()) missing.push('eventTitle');
-    if (!data.startDate) missing.push('startDate');
-    if (!data.endDate) missing.push('endDate');
-    if (!data.startTime || !data.startTime.trim()) missing.push('startTime');
-    if (!data.duration || !data.duration.trim()) missing.push('duration');
-    if (!data.venue) missing.push('venue');
-    if ((data.venue === 'Classroom' || data.venue === 'Other') && (!data.customVenue || !data.customVenue.trim())) {
-      missing.push('customVenue');
-    }
-    if (!data.coord1) missing.push('coord1');
-    return missing;
-  };
-
-  const fieldQuestions = {
-    eventType: "What is the event type? Is it a workshop, hackathon, guest lecture, or something else?",
-    eventTitle: "What is the title of the event?",
-    startDate: "What is the start date of the event?",
-    endDate: "What is the end date of the event?",
-    startTime: "What time does the event start?",
-    duration: "What is the duration of the event?",
-    venue: "What is the venue? For example, M G Auditorium, Netaji Auditorium, Classroom, or Online?",
-    customVenue: "Please specify the custom venue name.",
-    coord1: "Who is the primary faculty coordinator?"
-  };
-
-  // Smart Fill - parse natural language into form fields via Groq
-  const handleSmartFill = async (text, isVoiceFlow = false) => {
-    if (!text.trim()) return;
-    setSmartFillLoading(true);
-    try {
-      const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      const prompt = `You are a form parser for a college event report tool. Today's date is ${todayStr}.
-
-Extract structured data from the user's description. Return ONLY valid JSON, no markdown, no explanation.
-
-Available event types: ${eventTypesList.join(', ')}
-Available venues: ${venuesList.join(', ')}
-
-JSON schema:
-{
-  "eventType": "one of the available types or empty string",
-  "eventTitle": "string or empty",
-  "startDate": "YYYY-MM-DD or empty",
-  "endDate": "YYYY-MM-DD or empty",
-  "startTime": "h:mm AM/PM or empty",
-  "duration": "e.g. 2 hours, 90 mins, or empty",
-  "venue": "one of the available venues or empty",
-  "customVenue": "if venue is Classroom or Other, the name, else empty",
-  "description": "event summary text or empty",
-  "resourcePersonEnabled": true/false,
-  "resourcePerson": {
-    "name": "", "designation": "", "organization": "", "place": "", "email": "", "mobile": ""
-  },
-  "unfilled": ["list of field names that could not be determined"]
-}
-
-Rules:
-- If a date is relative (like "30th this month", "last Tuesday") resolve it using today's date.
-- If a date is impossible (like "38th June") put it in unfilled and leave the field empty.
-- If you cannot determine a field, leave it as empty string and add it to unfilled.
-- Never guess. Only extract what is clearly stated or implied.
-
-User input:
-${text}`;
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer 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'
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.3
-        })
-      });
-
-      if (!response.ok) throw new Error('API request failed');
-
-      const data = await response.json();
-      const raw = data.choices[0].message.content.trim();
-
-      let parsed;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        showToast("Couldn't parse that. Try being more specific.");
-        return;
-      }
-
-      const flags = parsed.unfilled || [];
-      setSmartFillFlags(flags);
-
-      let updatedData;
-      setFormData(prev => {
-        const updated = { ...prev };
-        if (parsed.eventType) updated.eventType = parsed.eventType;
-        if (parsed.eventTitle) updated.eventTitle = parsed.eventTitle;
-        if (parsed.startDate) updated.startDate = parsed.startDate;
-        if (parsed.endDate) updated.endDate = parsed.endDate;
-        if (parsed.startTime) updated.startTime = parsed.startTime;
-        if (parsed.duration) updated.duration = parsed.duration;
-        if (parsed.venue) updated.venue = parsed.venue;
-        if (parsed.customVenue) updated.customVenue = parsed.customVenue;
-        if (parsed.description) updated.description = parsed.description;
-        if (parsed.resourcePersonEnabled !== undefined) updated.resourcePersonEnabled = parsed.resourcePersonEnabled;
-        if (parsed.resourcePerson) {
-          const rp = { ...updated.resourcePerson };
-          if (parsed.resourcePerson.name) rp.name = parsed.resourcePerson.name;
-          if (parsed.resourcePerson.designation) rp.designation = parsed.resourcePerson.designation;
-          if (parsed.resourcePerson.organization) rp.organization = parsed.resourcePerson.organization;
-          if (parsed.resourcePerson.place) rp.place = parsed.resourcePerson.place;
-          if (parsed.resourcePerson.email) rp.email = parsed.resourcePerson.email;
-          if (parsed.resourcePerson.mobile) rp.mobile = parsed.resourcePerson.mobile;
-          updated.resourcePerson = rp;
-        }
-        updatedData = updated;
-        return updated;
-      });
-
-      if (isVoiceFlow) {
-        stopListening();
-        const missing = getMissingMandatoryFields(updatedData);
-        if (missing.length > 0) {
-          setSmartFillAwaitingVoiceAnswer(true);
-          setSmartFillActiveField(missing[0]);
-          const qText = fieldQuestions[missing[0]];
-          speakOutLoud(qText);
-          setVoiceTranscript('');
-          setTimeout(() => {
-            startListening();
-          }, 1000);
-        } else {
-          setView('create');
-          setStep(1);
-          setSmartFillOpen(false);
-          setSmartFillInput('');
-          setVoiceTranscript('');
-          speakOutLoud("All mandatory fields are filled. Redirecting to review.");
-          showToast('Smart Fill done. All fields filled.');
-        }
-      } else {
-        setView('create');
-        setStep(1);
-        setSmartFillOpen(false);
-        setSmartFillInput('');
-        setVoiceTranscript('');
-        if (flags.length > 0) {
-          showToast(`Smart Fill done. ${flags.length} fields need your attention.`);
-        } else {
-          showToast('Smart Fill done. All fields filled.');
-        }
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("Couldn't reach Groq. Try again.");
-    } finally {
-      setSmartFillLoading(false);
-    }
-  };
-
-  // Parse voice answer for a single prompt field
-  const handleSmartFillAnswer = async (answerText) => {
-    if (!answerText.trim() || !smartFillActiveField) return;
-    setSmartFillLoading(true);
-    stopListening();
-    try {
-      const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      let fieldHint = '';
-      if (smartFillActiveField === 'eventType') fieldHint = `Available types: ${eventTypesList.join(', ')}.`;
-      if (smartFillActiveField === 'venue') fieldHint = `Available venues: ${venuesList.join(', ')}.`;
-
-      const prompt = `You are a helper parsing a single field "${smartFillActiveField}" from user voice input.
-Today's date is ${todayStr}.
-${fieldHint}
-
-User spoke: "${answerText}"
-
-Extract the value for "${smartFillActiveField}" based on their speech.
-Rules:
-- For date fields, output in YYYY-MM-DD format. If relative, resolve using today's date. If impossible, leave empty.
-- For all other fields, output the clean extracted value (e.g. if eventType, output one of the available types. If venue, output one of the available venues).
-- Return ONLY a JSON object: {"value": "extracted_value_here", "unfilled": true/false} (unfilled should be true if it cannot be determined). Do not return any other text.`;
-
-      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer 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'
-        },
-        body: JSON.stringify({
-          model: 'llama-3.3-70b-versatile',
-          messages: [{ role: 'user', content: prompt }],
-          temperature: 0.2
-        })
-      });
-
-      if (!response.ok) throw new Error('API request failed');
-
-      const data = await response.json();
-      const raw = data.choices[0].message.content.trim();
-      let parsed;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        showToast("Couldn't parse that. Please speak clearly.");
-        return;
-      }
-
-      let updatedData;
-      setFormData(prev => {
-        const nextData = { ...prev };
-        if (parsed.unfilled) {
-          setSmartFillFlags(f => [...new Set([...f, smartFillActiveField])]);
-        } else {
-          nextData[smartFillActiveField] = parsed.value;
-          setSmartFillFlags(f => f.filter(x => x !== smartFillActiveField));
-        }
-        updatedData = nextData;
-        return nextData;
-      });
-
-      const remaining = getMissingMandatoryFields(updatedData);
-      if (remaining.length > 0) {
-        const nextF = remaining[0];
-        setSmartFillActiveField(nextF);
-        const qText = fieldQuestions[nextF];
-        speakOutLoud(qText);
-        setVoiceTranscript('');
-        setTimeout(() => {
-          startListening();
-        }, 1000);
-      } else {
-        setSmartFillActiveField(null);
-        setSmartFillAwaitingVoiceAnswer(false);
-        setSmartFillOpen(false);
-        setVoiceTranscript('');
-        setView('create');
-        setStep(1);
-        speakOutLoud("All mandatory fields are filled. Let's review the report.");
-        showToast('Smart Fill voice flow complete!');
-      }
-    } catch (e) {
-      console.error(e);
-      showToast("Error processing voice answer.");
-    } finally {
-      setSmartFillLoading(false);
-    }
-  };
-
-  const finishVoiceFlowManually = () => {
-    stopListening();
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-    }
-    const remaining = getMissingMandatoryFields(formData);
-    setSmartFillFlags(prev => [...new Set([...prev, ...remaining])]);
-    setSmartFillActiveField(null);
-    setSmartFillAwaitingVoiceAnswer(false);
-    setSmartFillOpen(false);
-    setVoiceTranscript('');
-    setView('create');
-    setStep(1);
-    showToast('Voice flow ended. Please review the form.');
-  };
-
-  // Voice recognition - start listening
-  const startListening = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      showToast('Speech recognition not supported in this browser.');
-      return;
-    }
-    setVoiceTranscript('');
-    setIsListening(true);
-    const recognition = new SpeechRecognition();
-    recognition.lang = 'en-IN';
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognitionRef.current = recognition;
-
-    let finalTranscript = '';
-    recognition.onresult = (event) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) {
-          finalTranscript += event.results[i][0].transcript + ' ';
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-      setVoiceTranscript(finalTranscript + interim);
-    };
-
-    recognition.onend = () => {
-      // Auto-restart if still listening
-      if (recognitionRef.current && isListening) {
-        try { recognition.start(); } catch {}
-      }
-    };
-
-    recognition.onerror = (e) => {
-      console.error('Speech recognition error:', e.error);
-      if (e.error !== 'no-speech') {
-        setIsListening(false);
-      }
-    };
-
-    recognition.start();
-  };
-
-  // Voice recognition - stop listening
-  const stopListening = () => {
-    setIsListening(false);
-    if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
-      recognitionRef.current = null;
-    }
-  };
-
-  // Direct completed report upload
-  const handleCompletedReportUpload = async (e) => {
-    const file = e.target.files?.[0];
-    const eventName = prompt('Enter the Event Name for this report:');
-    if (!file || !eventName) return;
-
-    // Normalize filename
-    const cleanName = eventName
-      .toLowerCase()
-      .trim()
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, '_');
-    const newFilename = `${cleanName}_report.docx`;
-
-    if (convexDb) {
-      // For Convex, store simulated base64 to avoid huge binary transfer issues in cloud dev functions
-      await convexDb.addReport(eventName, 'Direct Upload', new Date().toLocaleDateString(), newFilename, 'base64_simulated_contents');
-    } else {
-      const newReport = {
-        id: Date.now(),
-        eventName: eventName,
-        filename: newFilename,
-        uploadDate: new Date().toLocaleDateString(),
-        status: 'Pending Review'
-      };
-      const updated = [...uploadedReports, newReport];
-      setUploadedReports(updated);
-      localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
-    }
-    showToast(`Report uploaded and saved as ${newFilename}`);
-    
-    // Clear input
-    if (docxInputRef.current) docxInputRef.current.value = '';
-  };
-
-  // Reset/Discard draft
   const discardDraft = () => {
-    if (window.confirm('Are you sure you want to discard this report? All progress will be lost.')) {
+    if (window.confirm('Are you sure you want to discard this report? All unsaved progress will be lost.')) {
       localStorage.removeItem('mic_report_draft');
       setFormData({
         eventType: 'Workshop',
@@ -931,7 +502,8 @@ Rules:
         images: [],
         brochureImage: null,
         financeEnabled: false,
-        finance: { expenditure: '', revenue: '', remarks: '' }
+        finance: { expenditure: '', revenue: '', remarks: '' },
+        selectedLogos: []
       });
       setStep(1);
       setView('landing');
@@ -942,9 +514,15 @@ Rules:
   // Generation of docx template
   const generateDocxFile = async () => {
     try {
-      const response = await fetch('/template.docx');
-      if (!response.ok) throw new Error('Could not fetch template file from server.');
-      const buffer = await response.arrayBuffer();
+      let buffer;
+      const savedTemplate = localStorage.getItem('mic_custom_template') || customTemplate;
+      if (savedTemplate) {
+        buffer = base64ToArrayBuffer(savedTemplate);
+      } else {
+        const response = await fetch('/template.docx');
+        if (!response.ok) throw new Error('Could not fetch template file from server.');
+        buffer = await response.arrayBuffer();
+      }
       
       const zip = new PizZip(buffer);
       const doc = new Docxtemplater(zip, {
@@ -953,8 +531,8 @@ Rules:
       });
 
       // Fetch details of coordinators
-      const f1 = coordinators.find(c => c.empId === formData.coord1);
-      const f2 = coordinators.find(c => c.empId === formData.coord2);
+      const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
+      const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
 
       const renderData = {
         event_type: formData.eventType || '',
@@ -994,7 +572,7 @@ Rules:
         revenue: formData.financeEnabled ? formData.finance.revenue : '',
         remarks: formData.financeEnabled ? formData.finance.remarks : '',
 
-        // Image text placeholders to prevent compilation issues
+        // Image text placeholders
         brochure_img: formData.brochureImage ? '[Event Brochure / Flyer Attached]' : '[No Brochure Flyer Attached]',
         images: formData.images && formData.images.length > 0 
           ? formData.images.map((_, i) => ({ img: `[Event Execution Photo ${i + 1} Attached]` })) 
@@ -1027,9 +605,41 @@ Rules:
 
   // Generate beautiful HTML-based Word Doc (preserves images perfectly)
   const generateRichWordDoc = () => {
-    const f1 = coordinators.find(c => c.empId === formData.coord1);
-    const f2 = coordinators.find(c => c.empId === formData.coord2);
+    const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
+    const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
     
+    // Logos table html
+    const activeOptionalLogos = logos.filter(l => l.isOptional && formData.selectedLogos.includes(l.id));
+    const leftLogo = logos.find(l => l.id === 'vitc');
+    const centerLogo = logos.find(l => l.id === 'mic');
+    const rightLogo = logos.find(l => l.id === 'swc');
+
+    const half = Math.ceil(activeOptionalLogos.length / 2);
+    const leftGroup = activeOptionalLogos.slice(0, half);
+    const rightGroup = activeOptionalLogos.slice(half);
+
+    const orderedLogos = [
+      leftLogo,
+      ...leftGroup,
+      centerLogo,
+      ...rightGroup,
+      rightLogo
+    ].filter(Boolean);
+
+    const logoCells = orderedLogos.map(logo => `
+      <td style="border: none; text-align: center; vertical-align: middle;">
+        <img src="${logo.dataUrl}" style="height: 50px; width: auto;" alt="${logo.name}" />
+      </td>
+    `).join('');
+
+    const logosTableHtml = `
+      <table style="width: 100%; border: none; margin-bottom: 20px;">
+        <tr>
+          ${logoCells}
+        </tr>
+      </table>
+    `;
+
     const docHtml = `
       <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
       <head>
@@ -1063,6 +673,7 @@ Rules:
         </style>
       </head>
       <body>
+        ${logosTableHtml}
         <div class="title">Microsoft Innovations Club</div>
         <div class="subtitle">VALUE ADDED / GUEST LECTURE / SEMINAR / WORKSHOP / SYMPOSIUM / CONFERENCE / TRAINING PROGRAM DETAILS</div>
         
@@ -1233,7 +844,54 @@ Rules:
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    showToast('Full report with images downloaded.');
+    showToast('Full report downloaded.');
+  };
+
+  // Direct completed report upload
+  const handleCompletedReportUpload = async (e) => {
+    const file = e.target.files?.[0];
+    const eventName = prompt('Enter the Event Name for this report:');
+    if (!file || !eventName) return;
+
+    // Normalize filename
+    const cleanName = eventName
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s]/g, '')
+      .replace(/\s+/g, '_');
+    const newFilename = `${cleanName}_report.docx`;
+
+    if (convexDb) {
+      await convexDb.addReport(eventName, 'Direct Upload', new Date().toLocaleDateString(), newFilename, 'base64_simulated_contents');
+    } else {
+      const newReport = {
+        id: Date.now(),
+        eventName: eventName,
+        filename: newFilename,
+        uploadDate: new Date().toLocaleDateString(),
+        status: 'Pending Review',
+        fileData: 'base64_simulated_contents'
+      };
+      const updated = [...uploadedReports, newReport];
+      setUploadedReports(updated);
+      localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+    }
+    showToast(`Report uploaded and saved as ${newFilename}`);
+    if (docxInputRef.current) docxInputRef.current.value = '';
+  };
+
+  const deleteReport = async (rep) => {
+    if (window.confirm('Are you sure you want to delete this report?')) {
+      const id = rep.id || rep._id;
+      if (convexDb) {
+        await convexDb.removeReport(id);
+      } else {
+        const updated = uploadedReports.filter(r => r.id !== id);
+        setUploadedReports(updated);
+        localStorage.setItem('mic_uploaded_reports', JSON.stringify(updated));
+      }
+      showToast('Report deleted.');
+    }
   };
 
   // Add faculty coordinator in admin panel
@@ -1296,12 +954,15 @@ Rules:
   };
 
   const deleteVenue = async (venue) => {
-    if (convexDb) {
-      await convexDb.removeVenue(venue._id);
-    } else {
-      const updated = venues.filter(v => v !== venue);
-      setVenues(updated);
-      localStorage.setItem('mic_venues', JSON.stringify(updated));
+    if (window.confirm(`Delete venue "${typeof venue === 'object' ? venue.name : venue}"?`)) {
+      if (convexDb) {
+        await convexDb.removeVenue(venue._id);
+      } else {
+        const updated = venues.filter(v => v !== venue);
+        setVenues(updated);
+        localStorage.setItem('mic_venues', JSON.stringify(updated));
+      }
+      showToast('Venue deleted');
     }
   };
 
@@ -1320,12 +981,15 @@ Rules:
   };
 
   const deleteEventType = async (type) => {
-    if (convexDb) {
-      await convexDb.removeEventType(type._id);
-    } else {
-      const updated = eventTypes.filter(t => t !== type);
-      setEventTypes(updated);
-      localStorage.setItem('mic_event_types', JSON.stringify(updated));
+    if (window.confirm(`Delete event type "${typeof type === 'object' ? type.name : type}"?`)) {
+      if (convexDb) {
+        await convexDb.removeEventType(type._id);
+      } else {
+        const updated = eventTypes.filter(t => t !== type);
+        setEventTypes(updated);
+        localStorage.setItem('mic_event_types', JSON.stringify(updated));
+      }
+      showToast('Event type deleted');
     }
   };
 
@@ -1333,9 +997,528 @@ Rules:
   const handleTemplateUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      showToast('Template file replaced.');
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = arrayBufferToBase64(event.target.result);
+        setCustomTemplate(base64);
+        localStorage.setItem('mic_custom_template', base64);
+        showToast('Template file replaced and saved.');
+      };
+      reader.readAsArrayBuffer(file);
       if (templateInputRef.current) templateInputRef.current.value = '';
     }
+  };
+
+  // Logo uploads and deletion
+  const handleLogoUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const name = prompt('Enter a display name for this logo:');
+      if (!name) return;
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target.result;
+        const newLogo = {
+          id: 'logo_' + Date.now(),
+          name: name,
+          isOptional: true,
+          src: '',
+          dataUrl: base64
+        };
+        const updated = [...logos, newLogo];
+        setLogos(updated);
+        localStorage.setItem('mic_logos', JSON.stringify(updated));
+        showToast(`Logo "${name}" uploaded successfully.`);
+      };
+      reader.readAsDataURL(file);
+    }
+    if (logoInputRef.current) logoInputRef.current.value = '';
+  };
+
+  const deleteLogo = (id) => {
+    const logoToDelete = logos.find(l => l.id === id);
+    if (!logoToDelete) return;
+    if (window.confirm(`Are you sure you want to delete the logo "${logoToDelete.name}"?`)) {
+      const updated = logos.filter(l => l.id !== id);
+      setLogos(updated);
+      localStorage.setItem('mic_logos', JSON.stringify(updated));
+      showToast(`Logo "${logoToDelete.name}" deleted.`);
+    }
+  };
+
+  // Upload brochure handler
+  const handleBrochureUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setFormData(prev => ({ ...prev, brochureImage: event.target.result }));
+        showToast('Brochure uploaded successfully.');
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Upload event photos handler
+  const handleImagesUpload = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    files.forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setFormData(prev => ({ ...prev, images: [...prev.images, event.target.result] }));
+      };
+      reader.readAsDataURL(file);
+    });
+    showToast(`${files.length} photo(s) selected.`);
+  };
+
+  // Refine description with Groq LLM
+  const handleRefineReportText = async () => {
+    if (!formData.description.trim()) {
+      showToast('Please write some content first');
+      return;
+    }
+    
+    setRefinementLoading(true);
+    try {
+      const promptText = `Clean up this event report. Fix grammar and make it read better.
+- Keep all facts, numbers, dates, names, and key outcomes.
+- Write like a normal person. No fancy words, no corporate speak, no filler.
+- Keep the length between 200 and 500 words.
+- Don't add headings, intros, markdown, or extra notes. Just give back the cleaned-up text.
+
+Report:
+${formData.description}`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: promptText }],
+          temperature: 0.7
+        })
+      });
+
+      if (!response.ok) throw new Error('API request failed');
+
+      const data = await response.json();
+      const text = data.choices[0].message.content.trim();
+      setRefinedText(text);
+      setShowRefineModal(true);
+    } catch (e) {
+      console.error(e);
+      showToast('Couldn\'t reach Groq. Text left as-is.');
+      setRefinedText(formData.description);
+      setShowRefineModal(true);
+    } finally {
+      setRefinementLoading(false);
+    }
+  };
+
+  const applyRefinedText = () => {
+    setFormData(prev => ({ ...prev, description: refinedText }));
+    setShowRefineModal(false);
+    showToast('Write-up updated.');
+  };
+
+  // Text-To-Speech helper
+  const speakOutLoud = (text) => {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-IN';
+      window.speechSynthesis.speak(utterance);
+      setVoiceSpeakPrompt(text);
+    }
+  };
+
+  // Missing fields helper for voice flows
+  const getMissingMandatoryFields = (data) => {
+    const missing = [];
+    if (!data.eventType) missing.push('eventType');
+    if (!data.eventTitle.trim()) missing.push('eventTitle');
+    if (!data.startDate) missing.push('startDate');
+    if (!data.endDate) missing.push('endDate');
+    if (!data.startTime.trim()) missing.push('startTime');
+    if (!data.duration.trim()) missing.push('duration');
+    if (!data.venue) missing.push('venue');
+    if ((data.venue === 'Classroom' || data.venue === 'Other') && !data.customVenue.trim()) {
+      missing.push('customVenue');
+    }
+    if (!data.coord1) missing.push('coord1');
+    return missing;
+  };
+
+  const fieldQuestions = {
+    eventType: "What is the event type? Choose workshop, competition, hackathon, guest lecture, seminar, symposium, conference, or value added session.",
+    eventTitle: "What is the title of the event?",
+    startDate: "What is the start date of the event?",
+    endDate: "What is the end date of the event?",
+    startTime: "What is the start time of the event? For example, ten A M or two P M.",
+    duration: "What is the duration of the event? For example, ninety minutes or three hours.",
+    venue: "What is the venue? MG Auditorium, Kasturba Auditorium, Kamaraj Auditorium, Netaji Auditorium, VOC Auditorium, Classroom, or Online.",
+    customVenue: "Could you specify the custom venue or classroom name?",
+    coord1: "Which faculty coordinator is managing this event?"
+  };
+
+  // Smart Fill description parsing
+  const handleSmartFill = async (text, isVoiceFlow = false) => {
+    if (!text.trim()) return;
+    setSmartFillLoading(true);
+    try {
+      const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      const promptText = `You are a form parser for a college event report tool. Today's date is ${todayStr}.
+
+Extract structured data from the user's description. Return ONLY valid JSON, no markdown, no explanation.
+
+Available event types: ${eventTypesList.join(', ')}
+Available venues: ${venuesList.join(', ')}
+
+JSON schema:
+{
+  "eventType": "one of the available types or empty string",
+  "eventTitle": "string or empty",
+  "startDate": "YYYY-MM-DD or empty",
+  "endDate": "YYYY-MM-DD or empty",
+  "startTime": "h:mm AM/PM or empty",
+  "duration": "e.g. 2 hours, 90 mins, or empty",
+  "venue": "one of the available venues or empty",
+  "customVenue": "if venue is Classroom or Other, the name, else empty",
+  "description": "event summary text or empty",
+  "resourcePersonEnabled": true/false,
+  "resourcePerson": {
+    "name": "", "designation": "", "organization": "", "place": "", "email": "", "mobile": ""
+  },
+  "unfilled": ["list of field names that could not be determined"]
+}
+
+Rules:
+- If a date is relative (like "30th this month", "last Tuesday") resolve it using today's date.
+- If a date is impossible (like "38th June") put it in unfilled and leave the field empty.
+- If you cannot determine a field, leave it as empty string and add it to unfilled.
+- Never guess. Only extract what is clearly stated or implied.
+
+User input:
+${text}`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: promptText }],
+          temperature: 0.3
+        })
+      });
+
+      if (!response.ok) throw new Error('API request failed');
+
+      const data = await response.json();
+      const raw = data.choices[0].message.content.trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        showToast("Couldn't parse that. Try being more specific.");
+        return;
+      }
+
+      const flags = parsed.unfilled || [];
+      setSmartFillFlags(flags);
+
+      let updatedData;
+      setFormData(prev => {
+        const updated = { ...prev };
+        if (parsed.eventType) updated.eventType = parsed.eventType;
+        if (parsed.eventTitle) updated.eventTitle = parsed.eventTitle;
+        if (parsed.startDate) updated.startDate = parsed.startDate;
+        if (parsed.endDate) updated.endDate = parsed.endDate;
+        if (parsed.startTime) updated.startTime = parsed.startTime;
+        if (parsed.duration) updated.duration = parsed.duration;
+        if (parsed.venue) updated.venue = parsed.venue;
+        if (parsed.customVenue) updated.customVenue = parsed.customVenue;
+        if (parsed.description) updated.description = parsed.description;
+        if (parsed.resourcePersonEnabled !== undefined) updated.resourcePersonEnabled = parsed.resourcePersonEnabled;
+        if (parsed.resourcePerson) {
+          const rp = { ...updated.resourcePerson };
+          if (parsed.resourcePerson.name) rp.name = parsed.resourcePerson.name;
+          if (parsed.resourcePerson.designation) rp.designation = parsed.resourcePerson.designation;
+          if (parsed.resourcePerson.organization) rp.organization = parsed.resourcePerson.organization;
+          if (parsed.resourcePerson.place) rp.place = parsed.resourcePerson.place;
+          if (parsed.resourcePerson.email) rp.email = parsed.resourcePerson.email;
+          if (parsed.resourcePerson.mobile) rp.mobile = parsed.resourcePerson.mobile;
+          updated.resourcePerson = rp;
+        }
+        updatedData = updated;
+        return updated;
+      });
+
+      if (isVoiceFlow) {
+        stopListening();
+        const missing = getMissingMandatoryFields(updatedData);
+        if (missing.length > 0) {
+          setSmartFillAwaitingVoiceAnswer(true);
+          setSmartFillActiveField(missing[0]);
+          const qText = fieldQuestions[missing[0]];
+          speakOutLoud(qText);
+          setVoiceTranscript('');
+          setTimeout(() => {
+            startListening();
+          }, 1000);
+        } else {
+          setView('create');
+          setStep(1);
+          setSmartFillOpen(false);
+          setSmartFillInput('');
+          setVoiceTranscript('');
+          speakOutLoud("All mandatory fields are filled. Redirecting to review.");
+          showToast('Smart Fill done. All fields filled.');
+        }
+      } else {
+        setView('create');
+        setStep(1);
+        setSmartFillOpen(false);
+        setSmartFillInput('');
+        setVoiceTranscript('');
+        if (flags.length > 0) {
+          showToast(`Smart Fill done. ${flags.length} fields need your attention.`);
+        } else {
+          showToast('Smart Fill done. All fields filled.');
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Couldn't reach Groq. Try again.");
+    } finally {
+      setSmartFillLoading(false);
+    }
+  };
+
+  // Parse voice answer for a single prompt field
+  const handleSmartFillAnswer = async (answerText) => {
+    if (!answerText.trim() || !smartFillActiveField) return;
+    setSmartFillLoading(true);
+    stopListening();
+    try {
+      const todayStr = new Date().toLocaleDateString('en-IN', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+      let fieldHint = '';
+      if (smartFillActiveField === 'eventType') fieldHint = `Available types: ${eventTypesList.join(', ')}.`;
+      if (smartFillActiveField === 'venue') fieldHint = `Available venues: ${venuesList.join(', ')}.`;
+
+      const promptText = `You are a helper parsing a single field "${smartFillActiveField}" from user voice input.
+Today's date is ${todayStr}.
+${fieldHint}
+
+User spoke: "${answerText}"
+
+Extract the value for "${smartFillActiveField}" based on their speech.
+Rules:
+- For date fields, output in YYYY-MM-DD format. If relative, resolve using today's date. If impossible, leave empty.
+- For all other fields, output the clean extracted value (e.g. if eventType, output one of the available types. If venue, output one of the available venues).
+- Return ONLY a JSON object: {"value": "extracted_value_here", "unfilled": true/false} (unfilled should be true if it cannot be determined). Do not return any other text.`;
+
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${GROQ_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          messages: [{ role: 'user', content: promptText }],
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) throw new Error('API request failed');
+
+      const data = await response.json();
+      const raw = data.choices[0].message.content.trim();
+      let parsed;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        showToast("Couldn't parse that. Please speak clearly.");
+        return;
+      }
+
+      let updatedData;
+      setFormData(prev => {
+        const nextData = { ...prev };
+        if (parsed.unfilled) {
+          setSmartFillFlags(f => [...new Set([...f, smartFillActiveField])]);
+        } else {
+          nextData[smartFillActiveField] = parsed.value;
+          setSmartFillFlags(f => f.filter(x => x !== smartFillActiveField));
+        }
+        updatedData = nextData;
+        return nextData;
+      });
+
+      const remaining = getMissingMandatoryFields(updatedData);
+      if (remaining.length > 0) {
+        const nextF = remaining[0];
+        setSmartFillActiveField(nextF);
+        const qText = fieldQuestions[nextF];
+        speakOutLoud(qText);
+        setVoiceTranscript('');
+        setTimeout(() => {
+          startListening();
+        }, 1000);
+      } else {
+        setSmartFillActiveField(null);
+        setSmartFillAwaitingVoiceAnswer(false);
+        setSmartFillOpen(false);
+        setVoiceTranscript('');
+        setView('create');
+        setStep(1);
+        speakOutLoud("All mandatory fields are filled. Let's review the report.");
+        showToast('Smart Fill voice flow complete!');
+      }
+    } catch (e) {
+      console.error(e);
+      showToast("Error processing voice answer.");
+    } finally {
+      setSmartFillLoading(false);
+    }
+  };
+
+  const finishVoiceFlowManually = () => {
+    stopListening();
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    const remaining = getMissingMandatoryFields(formData);
+    setSmartFillFlags(prev => [...new Set([...prev, ...remaining])]);
+    setSmartFillActiveField(null);
+    setSmartFillAwaitingVoiceAnswer(false);
+    setSmartFillOpen(false);
+    setVoiceTranscript('');
+    setView('create');
+    setStep(1);
+    showToast('Voice flow ended. Please review the form.');
+  };
+
+  // Voice recognition - start listening
+  const startListening = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition not supported in this browser.');
+      return;
+    }
+    setVoiceTranscript('');
+    setIsListening(true);
+    const recognition = new SpeechRecognition();
+    recognition.lang = 'en-IN';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognitionRef.current = recognition;
+
+    let finalTranscript = '';
+    recognition.onresult = (event) => {
+      let interim = '';
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript + ' ';
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      setVoiceTranscript(finalTranscript + interim);
+    };
+
+    recognition.onend = () => {
+      if (recognitionRef.current && isListening) {
+        try { recognition.start(); } catch {}
+      }
+    };
+
+    recognition.onerror = (e) => {
+      console.error('Speech recognition error:', e.error);
+      if (e.error !== 'no-speech') {
+        setIsListening(false);
+      }
+    };
+
+    recognition.start();
+  };
+
+  // Voice recognition - stop listening
+  const stopListening = () => {
+    setIsListening(false);
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+      recognitionRef.current = null;
+    }
+  };
+
+  // CSV uploaded mapper handler
+  const handleCSVUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setCsvErrors([]);
+    Papa.parse(file, {
+      header: true,
+      skipEmptyLines: true,
+      complete: (results) => {
+        const rows = results.data;
+        if (rows.length === 0) {
+          showToast('CSV is empty');
+          return;
+        }
+
+        // Map column headers
+        const headers = Object.keys(rows[0]);
+        let nameCol = headers.find(h => ['name', 'student name', 'full name', 'participant name'].includes(h.toLowerCase().trim()));
+        let regCol = headers.find(h => ['reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id'].includes(h.toLowerCase().trim()));
+        
+        if (!nameCol || !regCol) {
+          // Fallback guess first two cols
+          nameCol = headers[1] || headers[0];
+          regCol = headers[0];
+        }
+
+        const mapped = rows.map(r => {
+          const rawReg = (r[regCol] || '').toString().trim();
+          let type = 'External';
+          if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(rawReg)) {
+            type = 'Student';
+          } else if (/^[0-9]{5}$/.test(rawReg)) {
+            type = 'Faculty';
+          } else if (!rawReg) {
+            type = '';
+          }
+          return {
+            regNo: rawReg,
+            name: (r[nameCol] || '').toString().trim(),
+            type: type
+          };
+        }).filter(item => item.name); // Filter out blank name rows
+
+        setFormData(prev => ({
+          ...prev,
+          attendanceFileName: file.name,
+          attendanceData: mapped
+        }));
+        showToast(`Parsed ${mapped.length} participants.`);
+      },
+      error: () => {
+        showToast('Error parsing CSV file');
+      }
+    });
+    if (csvInputRef.current) csvInputRef.current.value = '';
   };
 
   const coordinatorsList = convexDb ? convexDb.coordinators : coordinators;
@@ -1345,6 +1528,7 @@ Rules:
   const eventTypesList = convexDb ? convexDb.eventTypes.map(t => typeof t === 'object' ? t.name : t) : eventTypes;
   const uploadedReportsList = convexDb ? convexDb.uploadedReports : uploadedReports;
 
+  // Render variables
   const mainContent = (
     <div className="app-container">
       {/* Top navbar */}
@@ -1376,11 +1560,13 @@ Rules:
             <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
           </button>
           
-          {userRole === 'admin' && (
+          {userRole && (
             <>
-              <button className="btn btn-secondary" onClick={() => navigate(currentPath === '/mic' ? '/user' : '/mic')}>
-                {currentPath === '/mic' ? 'Coordinators View' : 'Admin Panel'}
-              </button>
+              {userRole === 'admin' && (
+                <button className="btn btn-secondary" onClick={() => navigate((currentPath === '/mic' || currentPath === '/admin') ? '/user' : '/admin')}>
+                  {(currentPath === '/mic' || currentPath === '/admin') ? 'Coordinators View' : 'Admin Panel'}
+                </button>
+              )}
               <button className="btn btn-link" onClick={handleLogout} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <LogOut size={16} />
                 <span>Logout</span>
@@ -1392,1488 +1578,120 @@ Rules:
 
       {/* Main layout */}
       <main className="main-content">
-        {/* VIEW: PORTAL (Path /) */}
-        {currentPath === '/' && (
-          <div className="landing-split-container">
-            <div className="landing-left">
-              <div className="landing-mic-logo-row">
-                <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
-                <span className="landing-mic-tag">Microsoft Innovations Club</span>
-              </div>
-              <h1 className="landing-hero-title">MIC Report<br/>Generator.</h1>
-              <p className="landing-hero-subtitle">
-                Fill in your event details, upload attendance, and get a formatted VIT Chennai report as a Word doc. That's it.
-              </p>
-              <div className="landing-hero-actions" style={{ marginTop: 12 }}>
-                <button className="btn btn-primary" onClick={() => navigate('/user')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 28px', fontSize: 16, cursor: 'pointer' }}>
-                  <span>Get Started</span>
-                  <ArrowRight size={18} />
-                </button>
-              </div>
-            </div>
-            <div className="landing-right">
-              <div className="mic-silhouette-container">
-                <svg viewBox="0 0 400 400" className="mic-silhouette-svg">
-                  {/* Top Left Quadrant (dots) */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`tl-${r}-${c}`} 
-                        cx={50 + c * 16} 
-                        cy={50 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${(r + c) * 0.1}s` }}
-                      />
-                    ))
-                  )}
+        {!userRole ? (
+          <LoginCard 
+            username={username}
+            setUsername={setUsername}
+            password={password}
+            setPassword={setPassword}
+            handleLogin={handleLogin}
+          />
+        ) : (
+          <>
+            {/* VIEW: PORTAL/LANDING for logged-in user at root path */}
+            {currentPath === '/' && (
+              userRole === 'admin' ? navigate('/admin') : navigate('/user')
+            )}
 
-                  {/* Top Right Quadrant */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`tr-${r}-${c}`} 
-                        cx={210 + c * 16} 
-                        cy={50 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${(r + (7 - c)) * 0.1}s` }}
-                      />
-                    ))
-                  )}
+            {/* VIEW: ADMIN INTERFACE */}
+            {(currentPath === '/admin' || currentPath === '/mic') && userRole === 'admin' && (
+              <AdminPanel
+                adminSection={adminSection}
+                setAdminSection={setAdminSection}
+                uploadedReports={uploadedReports}
+                uploadedReportsList={uploadedReportsList}
+                deleteReport={deleteReport}
+                coordinators={coordinators}
+                coordinatorsList={coordinatorsList}
+                newFaculty={newFaculty}
+                setNewFaculty={setNewFaculty}
+                handleAddFaculty={handleAddFaculty}
+                facSigInputRef={facSigInputRef}
+                handleFacultySignatureUpload={handleFacultySignatureUpload}
+                deleteFaculty={deleteFaculty}
+                newVenue={newVenue}
+                setNewVenue={setNewVenue}
+                addVenue={addVenue}
+                venuesRaw={venuesRaw}
+                deleteVenue={deleteVenue}
+                newEventType={newEventType}
+                setNewEventType={setNewEventType}
+                addEventType={addEventType}
+                eventTypesRaw={eventTypesRaw}
+                deleteEventType={deleteEventType}
+                templateInputRef={templateInputRef}
+                handleTemplateUpload={handleTemplateUpload}
+                logos={logos}
+                logoInputRef={logoInputRef}
+                handleLogoUpload={handleLogoUpload}
+                deleteLogo={deleteLogo}
+                showToast={showToast}
+              />
+            )}
 
-                  {/* Bottom Left Quadrant */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`bl-${r}-${c}`} 
-                        cx={50 + c * 16} 
-                        cy={210 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${((7 - r) + c) * 0.1}s` }}
-                      />
-                    ))
-                  )}
-
-                  {/* Bottom Right Quadrant */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`br-${r}-${c}`} 
-                        cx={210 + c * 16} 
-                        cy={210 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${((7 - r) + (7 - c)) * 0.1}s` }}
-                      />
-                    ))
-                  )}
-                </svg>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW: ADMIN LOGIN (Path /mic, if not admin) */}
-        {currentPath === '/mic' && userRole !== 'admin' && (
-          <div className="login-card">
-            <div className="landing-illustration">
-              <FileText size={32} style={{ color: 'var(--accent)' }} />
-            </div>
-            <h2 className="login-title">MIC Administrator Access</h2>
-            <form onSubmit={handleLogin}>
-              <div className="form-group">
-                <label className="form-label">Username</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Admin Username"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label">Password</label>
-                <input 
-                  type="password" 
-                  className="form-input" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Admin Password"
-                  required
-                />
-              </div>
-              <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }}>
-                Login to Admin Panel
-              </button>
-            </form>
-          </div>
-        )}
-
-        {/* VIEW: COORDINATOR WORKSPACE LANDING (Path /user, landing view) */}
-        {currentPath === '/user' && view === 'landing' && (
-          <div className="landing-split-container">
-            <div className="landing-left">
-              <div className="landing-mic-logo-row">
-                <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
-                <span className="landing-mic-tag">Microsoft Innovations Club</span>
-              </div>
-              <h1 className="landing-hero-title">Your Reports</h1>
-              <p className="landing-hero-subtitle">
-                Start a new report or pick up where you left off. You can also upload a finished .docx if you just need it saved.
-              </p>
-              <div className="landing-hero-actions">
-                <button className="btn btn-primary" onClick={() => setView('create')}>
-                  Start New Report
-                </button>
-                <button className="btn btn-secondary" onClick={() => docxInputRef.current?.click()}>
-                  Upload Completed Report
-                </button>
-                <input 
-                  type="file" 
-                  ref={docxInputRef} 
-                  onChange={handleCompletedReportUpload} 
-                  accept=".docx" 
-                  style={{ display: 'none' }}
-                />
-              </div>
-            </div>
-            <div className="landing-right">
-              <div className="mic-silhouette-container">
-                <svg viewBox="0 0 400 400" className="mic-silhouette-svg">
-                  {/* Top Left Quadrant (dots) */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`tl-${r}-${c}`} 
-                        cx={50 + c * 16} 
-                        cy={50 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${(r + c) * 0.1}s` }}
-                      />
-                    ))
-                  )}
-
-                  {/* Top Right Quadrant */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`tr-${r}-${c}`} 
-                        cx={210 + c * 16} 
-                        cy={50 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${(r + (7 - c)) * 0.1}s` }}
-                      />
-                    ))
-                  )}
-
-                  {/* Bottom Left Quadrant */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`bl-${r}-${c}`} 
-                        cx={50 + c * 16} 
-                        cy={210 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${((7 - r) + c) * 0.1}s` }}
-                      />
-                    ))
-                  )}
-
-                  {/* Bottom Right Quadrant */}
-                  {Array.from({ length: 8 }).map((_, r) => 
-                    Array.from({ length: 8 }).map((_, c) => (
-                      <circle 
-                        key={`br-${r}-${c}`} 
-                        cx={210 + c * 16} 
-                        cy={210 + r * 16} 
-                        r="3.5" 
-                        fill="var(--accent)" 
-                        className="silhouette-dot"
-                        style={{ animationDelay: `${((7 - r) + (7 - c)) * 0.1}s` }}
-                      />
-                    ))
-                  )}
-                </svg>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW: CREATE REPORT WIZARD */}
-        {currentPath === '/user' && view === 'create' && (
-          <div className="form-wizard">
-            <div className="wizard-header">
-              <span className="wizard-title">{formData.eventTitle || 'New Event Report'}</span>
-              <span className="wizard-progress">Step {step} of 6</span>
-            </div>
-            
-            <div className="wizard-body">
-              {/* Step 1: Event Details & Faculty Coordinators */}
-              {step === 1 && (
-                <div>
-                  <h2 className="step-question">Event basics</h2>
-                  <p className="step-description">What happened, when, where, and who coordinated it.</p>
-                  
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Event Type</label>
-                      <select 
-                        className={`form-input ${validationErrors.eventType ? 'error' : ''} ${smartFillFlags.includes('eventType') ? 'smart-fill-flagged' : ''}`}
-                        value={formData.eventType}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, eventType: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, eventType: null }));
-                        }}
-                      >
-                        <option value="">Select Event Type...</option>
-                        {eventTypesList.map(t => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                      {validationErrors.eventType && <span className="validation-error-text">{validationErrors.eventType}</span>}
-                      {smartFillFlags.includes('eventType') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                    
-                    <div className="form-group">
-                      <label className="form-label">Event Title</label>
-                      <input 
-                        type="text" 
-                        className={`form-input ${validationErrors.eventTitle ? 'error' : ''} ${smartFillFlags.includes('eventTitle') ? 'smart-fill-flagged' : ''}`}
-                        placeholder="e.g. Android Development Workshop"
-                        value={formData.eventTitle}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, eventTitle: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, eventTitle: null }));
-                        }}
-                      />
-                      {validationErrors.eventTitle && <span className="validation-error-text">{validationErrors.eventTitle}</span>}
-                      {smartFillFlags.includes('eventTitle') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Start Date</label>
-                      <input 
-                        type="date" 
-                        className={`form-input ${validationErrors.startDate ? 'error' : ''} ${smartFillFlags.includes('startDate') ? 'smart-fill-flagged' : ''}`}
-                        value={formData.startDate}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, startDate: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, startDate: null }));
-                        }}
-                      />
-                      {validationErrors.startDate && <span className="validation-error-text">{validationErrors.startDate}</span>}
-                      {smartFillFlags.includes('startDate') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                    
-                    <div className="form-group">
-                      <label className="form-label">End Date</label>
-                      <input 
-                        type="date" 
-                        className={`form-input ${validationErrors.endDate ? 'error' : ''} ${smartFillFlags.includes('endDate') ? 'smart-fill-flagged' : ''}`}
-                        value={formData.endDate}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, endDate: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, endDate: null }));
-                        }}
-                      />
-                      {validationErrors.endDate && <span className="validation-error-text">{validationErrors.endDate}</span>}
-                      {smartFillFlags.includes('endDate') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Start Time</label>
-                      <input 
-                        type="text" 
-                        className={`form-input ${validationErrors.startTime ? 'error' : ''} ${smartFillFlags.includes('startTime') ? 'smart-fill-flagged' : ''}`}
-                        placeholder="e.g. 10:00 AM"
-                        value={formData.startTime}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, startTime: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, startTime: null }));
-                        }}
-                      />
-                      {validationErrors.startTime && <span className="validation-error-text">{validationErrors.startTime}</span>}
-                      {smartFillFlags.includes('startTime') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                    
-                    <div className="form-group">
-                      <label className="form-label">Duration</label>
-                      <input 
-                        type="text" 
-                        className={`form-input ${validationErrors.duration ? 'error' : ''} ${smartFillFlags.includes('duration') ? 'smart-fill-flagged' : ''}`}
-                        placeholder="e.g. 90 minutes, 3 hours"
-                        value={formData.duration}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, duration: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, duration: null }));
-                        }}
-                      />
-                      {validationErrors.duration && <span className="validation-error-text">{validationErrors.duration}</span>}
-                      {smartFillFlags.includes('duration') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="form-group">
-                      <label className="form-label">Venue</label>
-                      <select 
-                        className={`form-input ${validationErrors.venue ? 'error' : ''} ${smartFillFlags.includes('venue') ? 'smart-fill-flagged' : ''}`}
-                        value={formData.venue}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, venue: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, venue: null }));
-                        }}
-                      >
-                        <option value="">Select Venue...</option>
-                        {venuesList.map(v => <option key={v} value={v}>{v}</option>)}
-                      </select>
-                      {validationErrors.venue && <span className="validation-error-text">{validationErrors.venue}</span>}
-                      {smartFillFlags.includes('venue') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-
-                    {(formData.venue === 'Classroom' || formData.venue === 'Other') && (
-                      <div className="form-group">
-                        <label className="form-label">Custom Venue Name</label>
-                        <input 
-                          type="text" 
-                          className={`form-input ${validationErrors.customVenue ? 'error' : ''} ${smartFillFlags.includes('customVenue') ? 'smart-fill-flagged' : ''}`}
-                          placeholder="e.g. Netaji block 402"
-                          value={formData.customVenue}
-                          onChange={(e) => {
-                            setFormData(prev => ({ ...prev, customVenue: e.target.value }));
-                            setValidationErrors(prev => ({ ...prev, customVenue: null }));
-                          }}
-                        />
-                        {validationErrors.customVenue && <span className="validation-error-text">{validationErrors.customVenue}</span>}
-                        {smartFillFlags.includes('customVenue') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="form-row" style={{ borderTop: '1px solid var(--border-light)', paddingTop: 20, marginTop: 20 }}>
-                    <div className="form-group">
-                      <label className="form-label">Faculty Coordinator 1</label>
-                      <select 
-                        className={`form-input ${validationErrors.coord1 ? 'error' : ''} ${smartFillFlags.includes('coord1') ? 'smart-fill-flagged' : ''}`}
-                        value={formData.coord1}
-                        onChange={(e) => {
-                          setFormData(prev => ({ ...prev, coord1: e.target.value }));
-                          setValidationErrors(prev => ({ ...prev, coord1: null }));
-                        }}
-                      >
-                        <option value="">Select Faculty...</option>
-                        {coordinatorsList.map(c => (
-                          <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
-                        ))}
-                      </select>
-                      {validationErrors.coord1 && <span className="validation-error-text">{validationErrors.coord1}</span>}
-                      {smartFillFlags.includes('coord1') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-
-                    <div className="form-group">
-                      <label className="form-label">Faculty Coordinator 2 (Optional)</label>
-                      <select 
-                        className={`form-input ${smartFillFlags.includes('coord2') ? 'smart-fill-flagged' : ''}`}
-                        value={formData.coord2}
-                        onChange={(e) => setFormData(prev => ({ ...prev, coord2: e.target.value }))}
-                      >
-                        <option value="">Select Faculty...</option>
-                        {coordinatorsList.map(c => (
-                          <option key={c.empId} value={c.empId}>{c.name} ({c.department})</option>
-                        ))}
-                      </select>
-                      {smartFillFlags.includes('coord2') && <span className="smart-fill-flag-text">⚠️ Not parsed by Smart Fill</span>}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 2: Resource Person */}
-              {step === 2 && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                    <div>
-                      <h2 className="step-question">Resource person</h2>
-                      <p className="step-description" style={{ marginBottom: 0 }}>If you had an external speaker or guest, turn this on and fill in their info.</p>
-                    </div>
-                    <label className="switch-container" style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={formData.resourcePersonEnabled}
-                        onChange={(e) => setFormData(prev => ({ ...prev, resourcePersonEnabled: e.target.checked }))}
-                        style={{ width: 20, height: 20, cursor: 'pointer' }}
-                      />
-                    </label>
-                  </div>
-
-                  {formData.resourcePersonEnabled && (
-                    <div className="fade-in">
-                      <div className="form-row">
-                        <div className="form-group">
-                          <label className="form-label">Resource Person Name</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={formData.resourcePerson.name}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              resourcePerson: { ...prev.resourcePerson, name: e.target.value }
-                            }))}
-                          />
-                        </div>
-                        
-                        <div className="form-group">
-                          <label className="form-label">Designation</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={formData.resourcePerson.designation}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              resourcePerson: { ...prev.resourcePerson, designation: e.target.value }
-                            }))}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="form-row">
-                        <div className="form-group">
-                          <label className="form-label">Organization</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={formData.resourcePerson.organization}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              resourcePerson: { ...prev.resourcePerson, organization: e.target.value }
-                            }))}
-                          />
-                        </div>
-                        
-                        <div className="form-group">
-                          <label className="form-label">Place</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={formData.resourcePerson.place}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              resourcePerson: { ...prev.resourcePerson, place: e.target.value }
-                            }))}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="form-row">
-                        <div className="form-group">
-                          <label className="form-label">Email</label>
-                          <input 
-                            type="email" 
-                            className="form-input"
-                            value={formData.resourcePerson.email}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              resourcePerson: { ...prev.resourcePerson, email: e.target.value }
-                            }))}
-                          />
-                        </div>
-                        
-                        <div className="form-group">
-                          <label className="form-label">Mobile Number</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={formData.resourcePerson.mobile}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              resourcePerson: { ...prev.resourcePerson, mobile: e.target.value }
-                            }))}
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Step 3: Event Report & Refinement */}
-              {step === 3 && (
-                <div>
-                  <h2 className="step-question">Event write-up</h2>
-                  <p className="step-description">Write or paste a summary of what happened at the event. Aim for 200 to 500 words.</p>
-                  
-                  <div className="form-group">
-                    <textarea 
-                      className="form-input"
-                      rows={8}
-                      style={{ resize: 'vertical', width: '100%', fontFamily: 'inherit', padding: 12 }}
-                      placeholder="Type or paste your report draft here..."
-                      value={formData.description}
-                      onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
-                    />
-                    
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                      <span className="dropzone-hint">
-                        Word Count: {formData.description.trim() ? formData.description.trim().split(/\s+/).length : 0} words
-                      </span>
-                      <button 
-                        className="btn btn-secondary" 
-                        onClick={handleRefineReportText}
-                        disabled={refinementLoading || !formData.description.trim()}
-                        style={{ gap: 6 }}
-                      >
-                        {refinementLoading ? <RefreshCw size={14} className="spin" /> : <RefreshCw size={14} />}
-                        Refine with Groq LLM
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Step 4: Attendance CSV Upload */}
-              {step === 4 && (
-                <div>
-                  <h2 className="step-question">Attendance</h2>
-                  <p className="step-description">Upload a CSV with participant info. Columns get matched automatically.</p>
-                  
-                  <div className="file-dropzone" onClick={() => csvInputRef.current?.click()}>
-                    <Upload size={32} className="dropzone-icon" />
-                    <p className="dropzone-text">Drop your CSV here, or click to pick a file</p>
-                    <p className="dropzone-hint">Accepted file type: .csv</p>
-                  </div>
-                  
-                  <input 
-                    type="file" 
-                    ref={csvInputRef} 
-                    onChange={handleCSVUpload} 
-                    accept=".csv" 
-                    style={{ display: 'none' }}
+            {/* VIEW: COORDINATOR WORKSPACE (Path /user) */}
+            {currentPath === '/user' && (
+              <>
+                {view === 'landing' && (
+                  <CoordinatorLanding
+                    setView={setView}
+                    docxInputRef={docxInputRef}
+                    handleCompletedReportUpload={handleCompletedReportUpload}
                   />
+                )}
 
-                  {formData.attendanceFileName && (
-                    <div style={{ marginTop: 16, padding: 12, backgroundColor: 'var(--bg)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: 14, fontWeight: 500 }}>{formData.attendanceFileName}</span>
-                      <span className="badge badge-success">{formData.attendanceData.length} participants</span>
-                    </div>
-                  )}
+                {view === 'create' && (
+                  <ReportWizard
+                    formData={formData}
+                    setFormData={setFormData}
+                    step={step}
+                    setStep={setStep}
+                    setView={setView}
+                    validationErrors={validationErrors}
+                    setValidationErrors={setValidationErrors}
+                    coordinatorsList={coordinatorsList}
+                    venuesList={venuesList}
+                    eventTypesList={eventTypesList}
+                    smartFillFlags={smartFillFlags}
+                    refinementLoading={refinementLoading}
+                    handleRefineReportText={handleRefineReportText}
+                    csvInputRef={csvInputRef}
+                    handleCSVUpload={handleCSVUpload}
+                    csvErrors={csvErrors}
+                    brochureInputRef={brochureInputRef}
+                    handleBrochureUpload={handleBrochureUpload}
+                    imagesInputRef={imagesInputRef}
+                    handleImagesUpload={handleImagesUpload}
+                    discardDraft={discardDraft}
+                    showToast={showToast}
+                    logos={logos}
+                  />
+                )}
 
-                  {csvErrors.length > 0 && (
-                    <div style={{ marginTop: 16, padding: 12, border: '1px solid #fecaca', backgroundColor: '#fef2f2', color: '#b91c1c', borderRadius: 'var(--radius-md)', fontSize: 13, display: 'flex', gap: 8 }}>
-                      <AlertCircle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
-                      <div>{csvErrors.join(', ')}</div>
-                    </div>
-                  )}
-                </div>
-              )}
+                {view === 'review' && (
+                  <ReviewSummary
+                    formData={formData}
+                    setFormData={setFormData}
+                    setView={setView}
+                    setStep={setStep}
+                    coordinators={coordinatorsList}
+                    discardDraft={discardDraft}
+                  />
+                )}
 
-              {/* Step 5: Brochure & Images */}
-              {step === 5 && (
-                <div>
-                  <h2 className="step-question">Photos and brochure</h2>
-                  <p className="step-description">Upload the event flyer and at least 2 photos from the event.</p>
-                  
-                  <div className="form-group" style={{ marginBottom: 24 }}>
-                    <label className="form-label">Event Brochure / Flyer</label>
-                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                      <button className="btn btn-secondary" onClick={() => brochureInputRef.current?.click()}>
-                        Upload Brochure Image
-                      </button>
-                      <input 
-                        type="file" 
-                        ref={brochureInputRef} 
-                        onChange={handleBrochureUpload} 
-                        accept="image/*" 
-                        style={{ display: 'none' }}
-                      />
-                      {formData.brochureImage && (
-                        <span className="badge badge-success">Brochure Selected</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="form-group">
-                    <label className="form-label">Event Photos (at least 2)</label>
-                    <button className="btn btn-secondary" onClick={() => imagesInputRef.current?.click()}>
-                      Upload Event Photos
-                    </button>
-                    <input 
-                      type="file" 
-                      ref={imagesInputRef} 
-                      onChange={handleImagesUpload} 
-                      accept="image/*" 
-                      multiple 
-                      style={{ display: 'none' }}
-                    />
-                    
-                    {formData.images.length > 0 && (
-                      <div className="image-preview-list">
-                        {formData.images.map((img, i) => (
-                          <div key={i} className="image-preview-item">
-                            <img src={img} alt={`Event photo ${i+1}`} className="image-preview-img" />
-                            <button 
-                              className="image-preview-remove" 
-                              onClick={() => setFormData(prev => ({ ...prev, images: prev.images.filter((_, idx) => idx !== i) }))}
-                            >
-                              <Trash size={12} />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Step 6: Finance Section */}
-              {step === 6 && (
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-                    <div>
-                      <h2 className="step-question">Money stuff</h2>
-                      <p className="step-description" style={{ marginBottom: 0 }}>Turn this on if there was any spending or revenue for this event.</p>
-                    </div>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', cursor: 'pointer' }}>
-                      <input 
-                        type="checkbox" 
-                        checked={formData.financeEnabled}
-                        onChange={(e) => setFormData(prev => ({ ...prev, financeEnabled: e.target.checked }))}
-                        style={{ width: 20, height: 20, cursor: 'pointer' }}
-                      />
-                    </label>
-                  </div>
-
-                  {formData.financeEnabled && (
-                    <div className="fade-in">
-                      <div className="form-row">
-                        <div className="form-group">
-                          <label className="form-label">Expenditure (Rs.)</label>
-                          <input 
-                            type="number" 
-                            className="form-input"
-                            placeholder="e.g. 5000"
-                            value={formData.finance.expenditure}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              finance: { ...prev.finance, expenditure: e.target.value }
-                            }))}
-                          />
-                        </div>
-                        
-                        <div className="form-group">
-                          <label className="form-label">Revenue (Rs.)</label>
-                          <input 
-                            type="number" 
-                            className="form-input"
-                            placeholder="e.g. 12000"
-                            value={formData.finance.revenue}
-                            onChange={(e) => setFormData(prev => ({
-                              ...prev,
-                              finance: { ...prev.finance, revenue: e.target.value }
-                            }))}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="form-group">
-                        <label className="form-label">Remarks</label>
-                        <textarea 
-                          className="form-input"
-                          rows={3}
-                          placeholder="Special remarks regarding finance..."
-                          value={formData.finance.remarks}
-                          onChange={(e) => setFormData(prev => ({
-                            ...prev,
-                            finance: { ...prev.finance, remarks: e.target.value }
-                          }))}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div className="wizard-footer">
-              <button 
-                className="btn btn-secondary" 
-                onClick={step === 1 ? discardDraft : () => setStep(step - 1)}
-              >
-                {step === 1 ? 'Discard Draft' : 'Back'}
-              </button>
-              
-              <button 
-                className="btn btn-primary" 
-                onClick={() => {
-                  if (step === 1) {
-                    const errors = {};
-                    if (!formData.eventType) errors.eventType = 'Event Type is required';
-                    if (!formData.eventTitle.trim()) errors.eventTitle = 'Event Title is required';
-                    if (!formData.startDate) errors.startDate = 'Start Date is required';
-                    if (!formData.endDate) errors.endDate = 'End Date is required';
-                    if (!formData.startTime.trim()) errors.startTime = 'Start Time is required';
-                    if (!formData.duration.trim()) errors.duration = 'Duration is required';
-                    if (!formData.venue) errors.venue = 'Venue is required';
-                    if ((formData.venue === 'Classroom' || formData.venue === 'Other') && !formData.customVenue.trim()) {
-                      errors.customVenue = 'Custom Venue Name is required';
-                    }
-                    if (!formData.coord1) errors.coord1 = 'Faculty Coordinator is required';
-
-                    if (Object.keys(errors).length > 0) {
-                      setValidationErrors(errors);
-                      showToast('Please fill all required fields');
-                      return;
-                    }
-                    setValidationErrors({});
-                  }
-
-                  if (step === 6) {
-                    setView('review');
-                  } else {
-                    setStep(step + 1);
-                  }
-                }}
-              >
-                <span>{step === 6 ? 'Review Summary' : 'Next'}</span>
-                <ArrowRight size={16} />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW: REVIEW & EDIT */}
-        {currentPath === '/user' && view === 'review' && (
-          <div className="review-container">
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-              <h2>Review Event Details</h2>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button className="btn btn-secondary" onClick={discardDraft} style={{ borderStyle: 'dashed' }}>
-                  Discard Report
-                </button>
-                <button className="btn btn-primary" onClick={() => setView('preview')}>
-                  Generate Preview
-                </button>
-              </div>
-            </div>
-
-            {/* Section 1: Basic Event info */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>1. Event Description</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(1); }}>
-                  Edit
-                </button>
-              </div>
-              <div className="review-data-grid">
-                <div className="review-data-item">
-                  <span className="review-data-label">Event Type</span>
-                  <span className="review-data-value">{formData.eventType}</span>
-                </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Event Title</span>
-                  <span className="review-data-value">{formData.eventTitle}</span>
-                </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Dates</span>
-                  <span className="review-data-value">{formData.startDate} to {formData.endDate}</span>
-                </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Time & Duration</span>
-                  <span className="review-data-value">{formData.startTime} to {formData.endTime} ({formData.duration})</span>
-                </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Venue</span>
-                  <span className="review-data-value">
-                    {formData.venue === 'Classroom' || formData.venue === 'Other' ? formData.customVenue : formData.venue}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Section 2: Coordinators */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>2. Coordinators</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(1); }}>
-                  Edit
-                </button>
-              </div>
-              <div className="review-data-grid">
-                <div className="review-data-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span className="review-data-label">Coordinator 1</span>
-                    <span className="review-data-value">
-                      {coordinators.find(c => c.empId === formData.coord1)?.name || 'None selected'}
-                    </span>
-                  </div>
-                  {formData.coord1 && (
-                    <button className="btn btn-link" style={{ color: '#ef4444', fontSize: 12, padding: 0 }} onClick={() => setFormData(prev => ({ ...prev, coord1: '' }))}>
-                      Remove
-                    </button>
-                  )}
-                </div>
-                <div className="review-data-item" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span className="review-data-label">Coordinator 2</span>
-                    <span className="review-data-value">
-                      {coordinators.find(c => c.empId === formData.coord2)?.name || 'None selected'}
-                    </span>
-                  </div>
-                  {formData.coord2 && (
-                    <button className="btn btn-link" style={{ color: '#ef4444', fontSize: 12, padding: 0 }} onClick={() => setFormData(prev => ({ ...prev, coord2: '' }))}>
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Section 3: Resource Person */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>3. Guest / Resource Person</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(2); }}>
-                  Edit
-                </button>
-              </div>
-              {formData.resourcePersonEnabled ? (
-                <div className="review-data-grid">
-                  <div className="review-data-item">
-                    <span className="review-data-label">Name</span>
-                    <span className="review-data-value">{formData.resourcePerson.name}</span>
-                  </div>
-                  <div className="review-data-item">
-                    <span className="review-data-label">Designation & Org</span>
-                    <span className="review-data-value">{formData.resourcePerson.designation}, {formData.resourcePerson.organization}</span>
-                  </div>
-                  <div className="review-data-item">
-                    <span className="review-data-label">Contact</span>
-                    <span className="review-data-value">{formData.resourcePerson.email} | {formData.resourcePerson.mobile}</span>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Skipped.</div>
-              )}
-            </div>
-
-            {/* Section 4: Report write up */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>4. Write-up</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(3); }}>
-                  Edit
-                </button>
-              </div>
-              <div style={{ fontSize: 14, textOverflow: 'ellipsis', whiteSpace: 'pre-wrap', maxHeight: 120, overflowY: 'auto', backgroundColor: '#fafafb', padding: 12, borderRadius: 6, border: '1px solid #eee' }}>
-                {formData.description || 'Nothing written yet.'}
-              </div>
-            </div>
-
-            {/* Section 5: Attendance */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>5. Attendance</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(4); }}>
-                  Edit
-                </button>
-              </div>
-              <div className="review-data-grid">
-                <div className="review-data-item">
-                  <span className="review-data-label">CSV Filename</span>
-                  <span className="review-data-value">{formData.attendanceFileName || 'No CSV uploaded'}</span>
-                </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Total Participants</span>
-                  <span className="review-data-value">{formData.attendanceData.length}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Section 6: Media */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>6. Photos & Brochure</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(5); }}>
-                  Edit
-                </button>
-              </div>
-              <div className="review-data-grid">
-                <div className="review-data-item">
-                  <span className="review-data-label">Brochure Selected?</span>
-                  <span className="review-data-value">{formData.brochureImage ? 'Yes' : 'No'}</span>
-                </div>
-                <div className="review-data-item">
-                  <span className="review-data-label">Event Photos</span>
-                  <span className="review-data-value">{formData.images.length} photos uploaded</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Section 7: Finance */}
-            <div className="review-section-card">
-              <div className="review-section-header">
-                <span className="review-section-title">
-                  <CheckCircle size={16} style={{ color: 'var(--accent)' }} />
-                  <span>7. Finance Details</span>
-                </span>
-                <button className="btn btn-link" onClick={() => { setView('create'); setStep(6); }}>
-                  Edit
-                </button>
-              </div>
-              {formData.financeEnabled ? (
-                <div className="review-data-grid">
-                  <div className="review-data-item">
-                    <span className="review-data-label">Expenditure</span>
-                    <span className="review-data-value">Rs. {formData.finance.expenditure || '0'}</span>
-                  </div>
-                  <div className="review-data-item">
-                    <span className="review-data-label">Revenue</span>
-                    <span className="review-data-value">Rs. {formData.finance.revenue || '0'}</span>
-                  </div>
-                  <div className="review-data-item">
-                    <span className="review-data-label">Remarks</span>
-                    <span className="review-data-value">{formData.finance.remarks || 'None'}</span>
-                  </div>
-                </div>
-              ) : (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 14 }}>Skipped.</div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* VIEW: DOCUMENT PREVIEW */}
-        {currentPath === '/user' && view === 'preview' && (
-          <div style={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            <div className="preview-nav">
-              <button className="btn btn-secondary" onClick={() => setView('review')} style={{ gap: 6 }}>
-                <ArrowLeft size={16} />
-                <span>Return to Summary</span>
-              </button>
-              <div style={{ display: 'flex', gap: 12 }}>
-                <button className="btn btn-secondary" onClick={generateDocxFile} style={{ gap: 6 }}>
-                  <Download size={16} />
-                  <span>Download DOCX Template</span>
-                </button>
-                <button className="btn btn-primary" onClick={generateRichWordDoc} style={{ gap: 6 }}>
-                  <Download size={16} />
-                  <span>Download Rich Word Document</span>
-                </button>
-              </div>
-            </div>
-
-            <div className="preview-container">
-              {/* Report Header */}
-              <div className="doc-header">Microsoft Innovations Club</div>
-              <div className="doc-subtitle">VALUE ADDED / GUEST LECTURE / SEMINAR / WORKSHOP / SYMPOSIUM / CONFERENCE / TRAINING PROGRAM DETAILS</div>
-              
-              {/* Details table */}
-              <table className="doc-table">
-                <tbody>
-                  <tr>
-                    <td style={{ width: '30%' }}><b>Event type</b></td>
-                    <td colSpan="3">{formData.eventType}</td>
-                  </tr>
-                  <tr>
-                    <td><b>Title of the event</b></td>
-                    <td colSpan="3">{formData.eventTitle}</td>
-                  </tr>
-                  <tr>
-                    <td><b>Date (From – To)</b></td>
-                    <td colSpan="3">{formData.startDate} to {formData.endDate}</td>
-                  </tr>
-                  <tr>
-                    <td><b>Time</b></td>
-                    <td colSpan="3">{formData.startTime} (Duration: {formData.duration})</td>
-                  </tr>
-                  <tr>
-                    <td><b>Venue</b></td>
-                    <td colSpan="3">
-                      {formData.venue === 'Classroom' || formData.venue === 'Other' ? formData.customVenue : formData.venue}
-                    </td>
-                  </tr>
-                  <tr>
-                    <td><b>No. of Participants</b></td>
-                    <td colSpan="3">{formData.attendanceData.length}</td>
-                  </tr>
-                  <tr style={{ backgroundColor: '#f2f2f2', fontWeight: 'bold' }}>
-                    <td rowSpan="3" style={{ verticalAlign: 'middle' }}>Coordinator(s)</td>
-                    <td>Emp. ID.</td>
-                    <td>Faculty Name</td>
-                    <td>Department</td>
-                  </tr>
-                  <tr>
-                    <td>{coordinators.find(c => c.empId === formData.coord1)?.empId || ''}</td>
-                    <td>{coordinators.find(c => c.empId === formData.coord1)?.name || ''}</td>
-                    <td>{coordinators.find(c => c.empId === formData.coord1)?.department || ''}</td>
-                  </tr>
-                  <tr>
-                    <td>{coordinators.find(c => c.empId === formData.coord2)?.empId || ''}</td>
-                    <td>{coordinators.find(c => c.empId === formData.coord2)?.name || ''}</td>
-                    <td>{coordinators.find(c => c.empId === formData.coord2)?.department || ''}</td>
-                  </tr>
-                  {formData.resourcePersonEnabled && (
-                    <>
-                      <tr>
-                        <td><b>Resource Person Name</b></td>
-                        <td colSpan="3">{formData.resourcePerson.name}</td>
-                      </tr>
-                      <tr>
-                        <td><b>Designation</b></td>
-                        <td colSpan="3">{formData.resourcePerson.designation}</td>
-                      </tr>
-                      <tr>
-                        <td><b>Organization Details</b></td>
-                        <td colSpan="3">{formData.resourcePerson.organization}</td>
-                      </tr>
-                      <tr>
-                        <td><b>Place</b></td>
-                        <td colSpan="3">{formData.resourcePerson.place}</td>
-                      </tr>
-                      <tr>
-                        <td><b>E-mail</b></td>
-                        <td colSpan="3">{formData.resourcePerson.email}</td>
-                      </tr>
-                      <tr>
-                        <td><b>Mobile no.</b></td>
-                        <td colSpan="3">{formData.resourcePerson.mobile}</td>
-                      </tr>
-                    </>
-                  )}
-                </tbody>
-              </table>
-
-              {/* Brochure Section */}
-              {formData.brochureImage && (
-                <div style={{ marginTop: 40, borderTop: '1px dashed #ddd', paddingTop: 20 }}>
-                  <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12, textTransform: 'uppercase' }}>
-                    Brochure / Circular of the Event / Programme Schedule
-                  </div>
-                  <div style={{ textAlign: 'center' }}>
-                    <img src={formData.brochureImage} alt="Event Flyer" style={{ maxWidth: '60%', height: 'auto', border: '1px solid #ddd' }} />
-                  </div>
-                </div>
-              )}
-
-              {/* Report Write-up outcomes */}
-              <div style={{ marginTop: 40, borderTop: '1px dashed #ddd', paddingTop: 20 }}>
-                <div className="doc-header" style={{ fontSize: 14 }}>A REPORT ON {(formData.eventTitle || '').toUpperCase()}</div>
-                <div style={{ textIndent: '40px', textAlign: 'justify', whiteSpace: 'pre-wrap', fontSize: 12, lineHeight: 1.6 }}>
-                  {formData.description}
-                </div>
-              </div>
-
-              {/* Images list */}
-              {formData.images.length > 0 && (
-                <div style={{ marginTop: 40, borderTop: '1px dashed #ddd', paddingTop: 20 }}>
-                  <div style={{ fontWeight: 'bold', fontSize: 13, marginBottom: 12, textTransform: 'uppercase' }}>
-                    Geotagged photos of the event with caption and date (at least 2 Nos)
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-                    {formData.images.map((img, idx) => (
-                      <div key={idx} style={{ textAlign: 'center', border: '1px solid #eee', padding: 8 }}>
-                        <img src={img} alt={`Event Execution ${idx+1}`} style={{ width: '100%', height: 'auto', maxHeight: 200, objectFit: 'cover' }} />
-                        <div style={{ fontSize: 9, marginTop: 4, fontStyle: 'italic' }}>
-                          Photo {idx+1}: Event in progress. Date: {formData.startDate}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Attendance Table */}
-              <div style={{ marginTop: 40, borderTop: '1px dashed #ddd', paddingTop: 20 }}>
-                <div className="doc-header" style={{ fontSize: 14 }}>Attendance</div>
-                <div style={{ fontWeight: 'bold', fontSize: 11, marginBottom: 12 }}>
-                  <div>Event Name: {formData.eventTitle}</div>
-                  <div>Date: {formData.startDate}</div>
-                </div>
-                
-                <table className="doc-table">
-                  <thead>
-                    <tr style={{ backgroundColor: '#f2f2f2', fontWeight: 'bold' }}>
-                      <th style={{ width: '8%' }}>Sl. No.</th>
-                      <th style={{ width: '30%' }}>Reg. No. / Emp. ID.</th>
-                      <th>Name</th>
-                      <th style={{ width: '15%' }}>Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {formData.attendanceData.map((p, idx) => (
-                      <tr key={idx}>
-                        <td>{idx + 1}</td>
-                        <td>{p.regNo}</td>
-                        <td>{p.name}</td>
-                        <td>{p.type === 'Student' ? 'S' : p.type === 'Faculty' ? 'F' : p.type === 'External' ? 'E' : ''}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Finance details */}
-              {formData.financeEnabled && (
-                <div style={{ marginTop: 40, borderTop: '1px dashed #ddd', paddingTop: 20 }}>
-                  <div className="doc-header" style={{ fontSize: 14 }}>Expenditure / Revenue Details of the Event</div>
-                  <table className="doc-table">
-                    <thead>
-                      <tr style={{ backgroundColor: '#f2f2f2', fontWeight: 'bold' }}>
-                        <th>Expenditure (Rs.)</th>
-                        <th>Revenue (Rs.)</th>
-                        <th>Remarks</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      <tr>
-                        <td>{formData.finance.expenditure || '0'}</td>
-                        <td>{formData.finance.revenue || '0'}</td>
-                        <td>{formData.finance.remarks || 'None'}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* Document Signatures */}
-              <div className="doc-signatures">
-                <div className="doc-sig-block">
-                  {coordinators.find(c => c.empId === formData.coord1)?.signature && (
-                    <img 
-                      src={coordinators.find(c => c.empId === formData.coord1)?.signature} 
-                      alt="Signature" 
-                      className="doc-sig-image" 
-                    />
-                  )}
-                  <div>Signature of the Coordinator</div>
-                </div>
-                <div className="doc-sig-block" style={{ justifyContent: 'flex-end' }}>
-                  <div>Signature of Asst. Director Student Welfare</div>
-                </div>
-                <div className="doc-sig-block" style={{ justifyContent: 'flex-end' }}>
-                  <div>Signature of the Dean / Director</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* VIEW: ADMIN INTERFACE */}
-        {currentPath === '/mic' && userRole === 'admin' && (
-          <div className="admin-layout">
-            <aside className="admin-sidebar">
-              <h2 style={{ fontSize: 16, fontWeight: 700, letterSpacing: -0.2 }}>MIC Administration</h2>
-              <nav className="admin-nav">
-                <div className={`admin-nav-item ${adminSection === 'reports' ? 'active' : ''}`} onClick={() => setAdminSection('reports')}>
-                  <FileText size={18} />
-                  <span>Uploaded Reports</span>
-                </div>
-                <div className={`admin-nav-item ${adminSection === 'faculty' ? 'active' : ''}`} onClick={() => setAdminSection('faculty')}>
-                  <Users size={18} />
-                  <span>Faculty Coordinators</span>
-                </div>
-                <div className={`admin-nav-item ${adminSection === 'config' ? 'active' : ''}`} onClick={() => setAdminSection('config')}>
-                  <Settings size={18} />
-                  <span>App Configurations</span>
-                </div>
-                <div className={`admin-nav-item ${adminSection === 'template' ? 'active' : ''}`} onClick={() => setAdminSection('template')}>
-                  <Upload size={18} />
-                  <span>Document Template</span>
-                </div>
-              </nav>
-            </aside>
-            
-            <main className="admin-main">
-              {/* Admin Panel: Reports */}
-              {adminSection === 'reports' && (
-                <div>
-                  <div className="admin-page-header">
-                    <h1 className="admin-page-title">Saved reports</h1>
-                    <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
-                      {uploadedReports.length} reports total
-                    </span>
-                  </div>
-                  <div className="admin-card">
-                    {uploadedReports.length > 0 ? (
-                      <table className="admin-table">
-                        <thead>
-                          <tr>
-                            <th>Event Name</th>
-                            <th>Saved Filename</th>
-                            <th>Upload Date</th>
-                            <th>Status</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {uploadedReportsList.map(rep => {
-                            const eventName = rep.eventName || rep.title || 'Event Report';
-                            const filename = rep.filename || rep.fileName || 'report.docx';
-                            const uploadDate = rep.uploadDate || rep.uploadedAt || 'Today';
-                            const id = rep.id || rep._id;
-                            return (
-                              <tr key={id}>
-                                <td style={{ fontWeight: 500 }}>{eventName}</td>
-                                <td style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{filename}</td>
-                                <td>{uploadDate}</td>
-                                <td>
-                                  <span className="badge badge-success">{rep.status || 'Saved'}</span>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-secondary)', fontSize: 14 }}>
-                        No reports saved yet.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* Admin Panel: Faculty Coordinators */}
-              {adminSection === 'faculty' && (
-                <div>
-                  <div className="admin-page-header">
-                    <h1 className="admin-page-title">Faculty coordinators</h1>
-                  </div>
-                  
-                  <div className="admin-card" style={{ marginBottom: 32 }}>
-                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Add Faculty Coordinator</h3>
-                    <form onSubmit={handleAddFaculty} className="inline-edit-form">
-                      <div className="form-row">
-                        <div className="form-group">
-                          <label className="form-label">Employee ID</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={newFaculty.empId}
-                            onChange={(e) => setNewFaculty(prev => ({ ...prev, empId: e.target.value }))}
-                            placeholder="e.g. 51280"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Faculty Name</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={newFaculty.name}
-                            onChange={(e) => setNewFaculty(prev => ({ ...prev, name: e.target.value }))}
-                            placeholder="e.g. Dr. John Doe"
-                          />
-                        </div>
-                      </div>
-                      
-                      <div className="form-row">
-                        <div className="form-group">
-                          <label className="form-label">Department</label>
-                          <input 
-                            type="text" 
-                            className="form-input"
-                            value={newFaculty.department}
-                            onChange={(e) => setNewFaculty(prev => ({ ...prev, department: e.target.value }))}
-                            placeholder="e.g. SCOPE"
-                          />
-                        </div>
-                        <div className="form-group">
-                          <label className="form-label">Electronic Signature (Image file)</label>
-                          <input 
-                            type="file" 
-                            ref={facSigInputRef}
-                            onChange={handleFacultySignatureUpload}
-                            accept="image/*"
-                            className="form-input"
-                          />
-                        </div>
-                      </div>
-                      
-                      <button type="submit" className="btn btn-primary" style={{ width: 'max-content', alignSelf: 'flex-end' }}>
-                        Add Coordinator
-                      </button>
-                    </form>
-                  </div>
-
-                  <div className="admin-card">
-                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Registered Coordinators</h3>
-                    <table className="admin-table">
-                      <thead>
-                        <tr>
-                          <th>Emp. ID.</th>
-                          <th>Faculty Name</th>
-                          <th>Department</th>
-                          <th>Electronic Signature</th>
-                          <th style={{ width: 80 }}>Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {coordinatorsList.map(c => (
-                          <tr key={c._id || c.empId}>
-                            <td>{c.empId}</td>
-                            <td style={{ fontWeight: 500 }}>{c.name}</td>
-                            <td>{c.department}</td>
-                            <td>
-                              {c.signature ? (
-                                <img src={c.signature} alt="Signature" style={{ maxHeight: 24, display: 'block' }} />
-                              ) : (
-                                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>No signature</span>
-                              )}
-                            </td>
-                            <td>
-                              <button className="btn btn-danger" onClick={() => deleteFaculty(c)} style={{ padding: '4px 8px', fontSize: 12 }}>
-                                Delete
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Admin Panel: Configurations */}
-              {adminSection === 'config' && (
-                <div>
-                  <div className="admin-page-header">
-                    <h1 className="admin-page-title">App Configurations</h1>
-                  </div>
-
-                  <div className="form-row">
-                    <div className="admin-card">
-                      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Configure Event Types</h3>
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                        <input 
-                          type="text" 
-                          className="form-input"
-                          placeholder="Add new event type..."
-                          value={newEventType}
-                          onChange={(e) => setNewEventType(e.target.value)}
-                        />
-                        <button className="btn btn-primary" onClick={addEventType}>
-                          <Plus size={16} />
-                        </button>
-                      </div>
-                      
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-                        {eventTypesRaw.map(t => {
-                          const name = typeof t === 'object' ? t.name : t;
-                          const id = typeof t === 'object' ? t._id : t;
-                          return (
-                            <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border-light)', borderRadius: 6 }}>
-                              <span style={{ fontSize: 14 }}>{name}</span>
-                              <button className="btn btn-link" onClick={() => deleteEventType(t)} style={{ color: '#b91c1c' }}>
-                                <Trash size={14} />
-                              </button>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="admin-card">
-                      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Configure Venues List</h3>
-                      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-                        <input 
-                          type="text" 
-                          className="form-input"
-                          placeholder="Add new venue..."
-                          value={newVenue}
-                          onChange={(e) => setNewVenue(e.target.value)}
-                        />
-                        <button className="btn btn-primary" onClick={addVenue}>
-                          <Plus size={16} />
-                        </button>
-                      </div>
-                      
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-                        {venuesRaw.map(v => {
-                          const name = typeof v === 'object' ? v.name : v;
-                          const id = typeof v === 'object' ? v._id : v;
-                          return (
-                            <div key={id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', border: '1px solid var(--border-light)', borderRadius: 6 }}>
-                              <span style={{ fontSize: 14 }}>{name}</span>
-                              {name !== 'Classroom' && name !== 'Other' && (
-                                <button className="btn btn-link" onClick={() => deleteVenue(v)} style={{ color: '#b91c1c' }}>
-                                  <Trash size={14} />
-                                </button>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Admin Panel: Templates */}
-              {adminSection === 'template' && (
-                <div>
-                  <div className="admin-page-header">
-                    <h1 className="admin-page-title">Report template</h1>
-                  </div>
-                  
-                  <div className="admin-card">
-                    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 24 }}>
-                      <div style={{ padding: 12, backgroundColor: 'var(--bg)', borderRadius: 'var(--radius-lg)' }}>
-                        <FileText size={48} style={{ color: 'var(--text-muted)' }} />
-                      </div>
-                      <div>
-                        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>Current Template: template.docx</h3>
-                        <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 12 }}>
-                          New reports are generated from this file. Replace it if your college updates the format.
-                        </p>
-                        <button className="btn btn-secondary" onClick={() => templateInputRef.current?.click()} style={{ gap: 6 }}>
-                          <Upload size={14} />
-                          Replace Official Template
-                        </button>
-                        <input 
-                          type="file" 
-                          ref={templateInputRef}
-                          onChange={handleTemplateUpload}
-                          accept=".docx"
-                          style={{ display: 'none' }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </main>
-          </div>
+                {view === 'preview' && (
+                  <DocumentPreview
+                    formData={formData}
+                    setView={setView}
+                    generateDocxFile={generateDocxFile}
+                    generateRichWordDoc={generateRichWordDoc}
+                    coordinators={coordinatorsList}
+                    logos={logos}
+                  />
+                )}
+              </>
+            )}
+          </>
         )}
       </main>
 
@@ -2886,17 +1704,16 @@ Rules:
               <span>Compare drafts</span>
             </h3>
             
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
               <div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Your version</span>
-                <div style={{ fontSize: 13, padding: 12, border: '1px solid var(--border-medium)', borderRadius: 6, maxHeight: 240, overflowY: 'auto', backgroundColor: '#fcfcfd', whiteSpace: 'pre-wrap' }}>
+                <span className="form-label" style={{ marginBottom: 8 }}>Original Draft</span>
+                <div style={{ fontSize: 13, height: 280, overflowY: 'auto', padding: 12, border: '1px solid var(--border-light)', borderRadius: 8, whiteSpace: 'pre-wrap', backgroundColor: 'var(--bg)' }}>
                   {formData.description}
                 </div>
               </div>
-              
               <div>
-                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', display: 'block', marginBottom: 6 }}>Cleaned-up version</span>
-                <div style={{ fontSize: 13, padding: 12, border: '1px solid var(--accent-border)', borderRadius: 6, maxHeight: 240, overflowY: 'auto', backgroundColor: 'var(--accent-light)', whiteSpace: 'pre-wrap' }}>
+                <span className="form-label" style={{ marginBottom: 8 }}>Refined Outcome</span>
+                <div style={{ fontSize: 13, height: 280, overflowY: 'auto', padding: 12, border: '1px solid var(--border-light)', borderRadius: 8, whiteSpace: 'pre-wrap', backgroundColor: 'var(--bg)' }}>
                   {refinedText}
                 </div>
               </div>
@@ -2904,10 +1721,10 @@ Rules:
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
               <button className="btn btn-secondary" onClick={() => setShowRefineModal(false)}>
-                Keep original
+                Cancel
               </button>
               <button className="btn btn-primary" onClick={applyRefinedText}>
-                Use this version
+                Use Refined Draft
               </button>
             </div>
           </div>
@@ -2916,169 +1733,191 @@ Rules:
 
       {/* Smart Fill FAB - only on /user workspace */}
       {currentPath === '/user' && (view === 'landing' || view === 'create') && (
-        <div className="smart-fill-container">
+        <>
           {smartFillOpen && (
-            <div className="smart-fill-panel">
-              {smartFillAwaitingVoiceAnswer ? (
-                // Conversational voice prompt view
-                <>
-                  <div className="smart-fill-header">
-                    <span className="smart-fill-title">Conversational Assist</span>
-                    <button className="smart-fill-close" onClick={finishVoiceFlowManually}>
-                      &times;
-                    </button>
-                  </div>
-                  <div className="smart-fill-body">
-                    <div className="smart-fill-prompt-card">
-                      <span className="smart-fill-prompt-label">
-                        Please provide: <strong>{{
-                          eventType: 'Event Type',
-                          eventTitle: 'Event Title',
-                          startDate: 'Start Date',
-                          endDate: 'End Date',
-                          startTime: 'Start Time',
-                          duration: 'Duration',
-                          venue: 'Venue',
-                          customVenue: 'Custom Venue Name',
-                          coord1: 'Primary Faculty Coordinator'
-                        }[smartFillActiveField] || smartFillActiveField}</strong>
-                      </span>
-                      <p className="smart-fill-prompt-question">{voiceSpeakPrompt}</p>
-                    </div>
-
-                    <div className="smart-fill-voice-area">
-                      <button 
-                        className={`smart-fill-mic-btn ${isListening ? 'listening' : ''}`}
-                        onClick={isListening ? stopListening : startListening}
-                      >
-                        <div className="mic-icon">{isListening ? '...' : <Mic size={28} />}</div>
+            <div 
+              className="modal-overlay" 
+              style={{ zIndex: 1100 }} 
+              onClick={(e) => {
+                if (e.target === e.currentTarget) {
+                  if (smartFillAwaitingVoiceAnswer) {
+                    finishVoiceFlowManually();
+                  } else {
+                    setSmartFillOpen(false);
+                    stopListening();
+                  }
+                }
+              }}
+            >
+              <div 
+                className="smart-fill-panel" 
+                style={{ width: '100%', maxWidth: '440px', margin: 0 }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {smartFillAwaitingVoiceAnswer ? (
+                  // Conversational voice prompt view
+                  <>
+                    <div className="smart-fill-header">
+                      <span className="smart-fill-title">Conversational Assist</span>
+                      <button className="smart-fill-close" onClick={finishVoiceFlowManually}>
+                        &times;
                       </button>
-                      <p className="smart-fill-voice-hint">
-                        {isListening ? 'Listening... speak now' : 'Tap to start speaking'}
-                      </p>
                     </div>
-
-                    {voiceTranscript && (
-                      <div className="smart-fill-transcript">
-                        <span className="transcript-label">Your answer:</span>
-                        <p>{voiceTranscript}</p>
+                    <div className="smart-fill-body">
+                      <div className="smart-fill-prompt-card">
+                        <span className="smart-fill-prompt-label">
+                          Please provide: <strong>{{
+                            eventType: 'Event Type',
+                            eventTitle: 'Event Title',
+                            startDate: 'Start Date',
+                            endDate: 'End Date',
+                            startTime: 'Start Time',
+                            duration: 'Duration',
+                            venue: 'Venue',
+                            customVenue: 'Custom Venue Name',
+                            coord1: 'Primary Faculty Coordinator'
+                          }[smartFillActiveField] || smartFillActiveField}</strong>
+                        </span>
+                        <p className="smart-fill-prompt-question">{voiceSpeakPrompt}</p>
                       </div>
-                    )}
 
-                    <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
-                      <button 
-                        className="btn btn-secondary" 
-                        onClick={finishVoiceFlowManually}
-                        style={{ flex: 1, fontSize: 13 }}
-                      >
-                        Finish manually
-                      </button>
-                      <button 
-                        className="btn btn-primary" 
-                        onClick={() => handleSmartFillAnswer(voiceTranscript)}
-                        disabled={smartFillLoading || !voiceTranscript.trim()}
-                        style={{ flex: 1, fontSize: 13, gap: 6 }}
-                      >
-                        {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Check size={14} />}
-                        Submit
+                      <div className="smart-fill-voice-area">
+                        <button 
+                          className={`smart-fill-mic-btn ${isListening ? 'listening' : ''}`}
+                          onClick={isListening ? stopListening : startListening}
+                        >
+                          <div className="mic-icon">{isListening ? '...' : <Mic size={28} />}</div>
+                        </button>
+                        <p className="smart-fill-voice-hint">
+                          {isListening ? 'Listening... speak now' : 'Tap to start speaking'}
+                        </p>
+                      </div>
+
+                      {voiceTranscript && (
+                        <div className="smart-fill-transcript">
+                          <span className="transcript-label">Your answer:</span>
+                          <p>{voiceTranscript}</p>
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+                        <button 
+                          className="btn btn-secondary" 
+                          onClick={finishVoiceFlowManually}
+                          style={{ flex: 1, fontSize: 13 }}
+                        >
+                          Finish manually
+                        </button>
+                        <button 
+                          className="btn btn-primary" 
+                          onClick={() => handleSmartFillAnswer(voiceTranscript)}
+                          disabled={smartFillLoading || !voiceTranscript.trim()}
+                          style={{ flex: 1, fontSize: 13, gap: 6 }}
+                        >
+                          {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Check size={14} />}
+                          Submit
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  // Normal Text / Voice modes selection
+                  <>
+                    <div className="smart-fill-header">
+                      <span className="smart-fill-title">Smart Fill</span>
+                      <button className="smart-fill-close" onClick={() => { setSmartFillOpen(false); stopListening(); }}>
+                        &times;
                       </button>
                     </div>
-                  </div>
-                </>
-              ) : (
-                // Normal Text / Voice modes selection
-                <>
-                  <div className="smart-fill-header">
-                    <span className="smart-fill-title">Smart Fill</span>
-                    <button className="smart-fill-close" onClick={() => { setSmartFillOpen(false); stopListening(); }}>
-                      &times;
-                    </button>
-                  </div>
-                  <div className="smart-fill-tabs">
-                    <button 
-                      className={`smart-fill-tab ${smartFillMode === 'text' ? 'active' : ''}`}
-                      onClick={() => { setSmartFillMode('text'); stopListening(); }}
-                    >Type it</button>
-                    <button 
-                      className={`smart-fill-tab ${smartFillMode === 'voice' ? 'active' : ''}`}
-                      onClick={() => setSmartFillMode('voice')}
-                    >Say it</button>
-                  </div>
-                  <div className="smart-fill-body">
-                    {smartFillMode === 'text' ? (
-                      <>
-                        <textarea
-                          className="smart-fill-textarea"
-                          rows={5}
-                          placeholder={'Describe your event in plain English...\ne.g. "We held a cybersecurity workshop on the 25th at MG Auditorium, 2pm, 3 hours"'}
-                          value={smartFillInput}
-                          onChange={(e) => setSmartFillInput(e.target.value)}
-                        />
-                        <button 
-                          className="btn btn-primary smart-fill-submit"
-                          onClick={() => handleSmartFill(smartFillInput)}
-                          disabled={smartFillLoading || !smartFillInput.trim()}
-                        >
-                          {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
-                          {smartFillLoading ? 'Parsing...' : 'Fill form'}
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <div className="smart-fill-voice-area">
-                          <button 
-                            className={`smart-fill-mic-btn ${isListening ? 'listening' : ''}`}
-                            onClick={isListening ? stopListening : startListening}
-                          >
-                            <div className="mic-icon">{isListening ? '...' : <Mic size={28} />}</div>
-                          </button>
-                          <p className="smart-fill-voice-hint">
-                            {isListening ? 'Listening... tap again when done' : 'Tap to start speaking'}
-                          </p>
-                        </div>
-                        {voiceTranscript && (
-                          <div className="smart-fill-transcript">
-                            <span className="transcript-label">Heard:</span>
-                            <p>{voiceTranscript}</p>
-                          </div>
-                        )}
-                        {voiceTranscript && !isListening && (
+                    <div className="smart-fill-tabs">
+                      <button 
+                        className={`smart-fill-tab ${smartFillMode === 'text' ? 'active' : ''}`}
+                        onClick={() => { setSmartFillMode('text'); stopListening(); }}
+                      >Type it</button>
+                      <button 
+                        className={`smart-fill-tab ${smartFillMode === 'voice' ? 'active' : ''}`}
+                        onClick={() => setSmartFillMode('voice')}
+                      >Say it</button>
+                    </div>
+                    <div className="smart-fill-body">
+                      {smartFillMode === 'text' ? (
+                        <>
+                          <textarea
+                            className="smart-fill-textarea"
+                            rows={5}
+                            placeholder={'Describe your event in plain English...\ne.g. "We held a cybersecurity workshop on the 25th at MG Auditorium, 2pm, 3 hours"'}
+                            value={smartFillInput}
+                            onChange={(e) => setSmartFillInput(e.target.value)}
+                          />
                           <button 
                             className="btn btn-primary smart-fill-submit"
-                            onClick={() => handleSmartFill(voiceTranscript, true)}
-                            disabled={smartFillLoading}
+                            onClick={() => handleSmartFill(smartFillInput)}
+                            disabled={smartFillLoading || !smartFillInput.trim()}
                           >
                             {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
-                            {smartFillLoading ? 'Parsing...' : 'Start Voice Flow'}
+                            {smartFillLoading ? 'Parsing...' : 'Fill form'}
                           </button>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  {smartFillFlags.length > 0 && (
-                    <div className="smart-fill-flags">
-                      <AlertCircle size={13} />
-                      <span>Couldn't fill: {smartFillFlags.join(', ')}</span>
+                        </>
+                      ) : (
+                        <>
+                          <div className="smart-fill-voice-area">
+                            <button 
+                              className={`smart-fill-mic-btn ${isListening ? 'listening' : ''}`}
+                              onClick={isListening ? stopListening : startListening}
+                            >
+                              <div className="mic-icon">{isListening ? '...' : <Mic size={28} />}</div>
+                            </button>
+                            <p className="smart-fill-voice-hint">
+                              {isListening ? 'Listening... tap again when done' : 'Tap to start speaking'}
+                            </p>
+                          </div>
+                          {voiceTranscript && (
+                            <div className="smart-fill-transcript">
+                              <span className="transcript-label">Heard:</span>
+                              <p>{voiceTranscript}</p>
+                            </div>
+                          )}
+                          {voiceTranscript && !isListening && (
+                            <button 
+                              className="btn btn-primary smart-fill-submit"
+                              onClick={() => handleSmartFill(voiceTranscript, true)}
+                              disabled={smartFillLoading}
+                            >
+                              {smartFillLoading ? <RefreshCw size={14} className="spin" /> : <Sparkles size={14} />}
+                              {smartFillLoading ? 'Parsing...' : 'Start Voice Flow'}
+                            </button>
+                          )}
+                        </>
+                      )}
                     </div>
-                  )}
-                </>
-              )}
+                    {smartFillFlags.length > 0 && (
+                      <div className="smart-fill-flags">
+                        <AlertCircle size={13} />
+                        <span>Couldn't fill: {smartFillFlags.join(', ')}</span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
             </div>
           )}
-          <button 
-            className={`smart-fill-fab ${smartFillOpen ? 'active' : ''}`}
-            onClick={() => {
-              if (smartFillOpen && smartFillAwaitingVoiceAnswer) {
-                finishVoiceFlowManually();
-              } else {
-                setSmartFillOpen(!smartFillOpen);
-              }
-            }}
-            title="Smart Fill"
-          >
-            <Sparkles size={22} />
-          </button>
-        </div>
+          <div className="smart-fill-container">
+            <button 
+              className={`smart-fill-fab ${smartFillOpen ? 'active' : ''}`}
+              onClick={() => {
+                if (smartFillOpen && smartFillAwaitingVoiceAnswer) {
+                  finishVoiceFlowManually();
+                } else {
+                  setSmartFillOpen(!smartFillOpen);
+                }
+              }}
+              title="Smart Fill"
+            >
+              <img src="/miclogo.png" alt="MIC" style={{ width: 18, height: 18, objectFit: 'contain', filter: 'brightness(0) invert(1)' }} />
+              <span>AI Smart Fill</span>
+            </button>
+          </div>
+        </>
       )}
 
       {/* Toast notifications container */}

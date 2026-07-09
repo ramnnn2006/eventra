@@ -1119,30 +1119,35 @@ input, select, textarea, button {
   flex-direction: column;
   align-items: flex-end;
   gap: 12px;
+  pointer-events: none; /* Let clicks pass through except on child elements */
 }
 
 .smart-fill-fab {
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-radius: 9999px;
   background: var(--accent);
   color: #fff;
   border: none;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   box-shadow: 0 4px 16px rgba(0,0,0,0.18);
-  transition: transform 0.2s, box-shadow 0.2s;
+  font-weight: 600;
+  font-size: 14px;
+  font-family: inherit;
+  transition: transform 0.2s, box-shadow 0.2s, background-color 0.2s;
+  pointer-events: auto; /* Enable pointer events back on the button */
 }
 
 .smart-fill-fab:hover {
-  transform: scale(1.08);
+  transform: translateY(-2px);
   box-shadow: 0 6px 24px rgba(0,0,0,0.24);
+  background-color: hsl(var(--accent-h), var(--accent-s), calc(var(--accent-l) - 5%));
 }
 
 .smart-fill-fab.active {
-  transform: rotate(45deg);
+  transform: scale(0.95);
 }
 
 .smart-fill-panel {
