@@ -214,7 +214,7 @@ export default function App() {
   // Auth Action
   const handleLogin = (e) => {
     e.preventDefault();
-    if (username === 'admin' && password === 'omgtheadmin') {
+    if (username === 'admin' && password === 'admin6767') {
       setUserRole('admin');
       setView('admin');
       showToast('Logged in as administrator');
@@ -223,7 +223,7 @@ export default function App() {
       setView('landing');
       showToast('Logged in as club coordinator');
     } else {
-      showToast('Invalid credentials. Use admin/omgtheadmin or user/user123');
+      showToast('Invalid credentials. Use admin/admin6767 or user/user123');
     }
   };
 
