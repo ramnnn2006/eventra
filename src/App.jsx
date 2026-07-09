@@ -951,17 +951,36 @@ ${formData.description}`;
                 <img src="/miclogo.png" alt="MIC Logo" className="landing-mic-logo-img" />
                 <span className="landing-mic-tag">Microsoft Innovations Club</span>
               </div>
-              <h1 className="landing-hero-title">MIC Event Portal</h1>
+              <h1 className="landing-hero-title">Report Mode<br/>for <span>MIC.</span></h1>
               <p className="landing-hero-subtitle">
-                An elegant, automated writer to format event reports in VIT Chennai template. Access your workspace below.
+                An elegant, automated workspace to format and compile official event reports in VIT Chennai template. Access your workspace below.
               </p>
-              <div className="landing-hero-actions">
-                <button className="btn btn-primary" onClick={() => navigate('/user')}>
-                  Coordinator Workspace
-                </button>
-                <button className="btn btn-secondary" onClick={() => navigate('/admin')}>
-                  Administrator Access
-                </button>
+              <div className="portal-cards-grid">
+                <div className="portal-card" onClick={() => navigate('/user')}>
+                  <div className="portal-card-icon">
+                    <Users size={20} />
+                  </div>
+                  <div className="portal-card-info">
+                    <span className="portal-card-title">
+                      Coordinator Workspace
+                      <ArrowRight size={14} className="portal-card-arrow" />
+                    </span>
+                    <span className="portal-card-desc">Start new reports, map attendance, and refine outcomes.</span>
+                  </div>
+                </div>
+                
+                <div className="portal-card" onClick={() => navigate('/admin')}>
+                  <div className="portal-card-icon">
+                    <Settings size={20} />
+                  </div>
+                  <div className="portal-card-info">
+                    <span className="portal-card-title">
+                      Administrator Access
+                      <ArrowRight size={14} className="portal-card-arrow" />
+                    </span>
+                    <span className="portal-card-desc">Configure settings, manage coordinators, and review uploads.</span>
+                  </div>
+                </div>
               </div>
             </div>
             <div className="landing-right">
