@@ -126,7 +126,7 @@ const detectColumns = (headers, rows) => {
 
   let maxNameScore = -1;
   let maxRegScore = -1;
-  let maxTypeScore = -1;
+  let maxTypeScore = 0; // Require a positive score (> 0) to auto-detect a Type column
 
   headers.forEach(h => {
     if (scores[h].name > maxNameScore) {
@@ -461,17 +461,23 @@ export default function App() {
       const rawName = (r[colMap.name] || '').toString().trim();
       
       let type = 'External';
+      let resolved = false;
       if (colMap.type && r[colMap.type]) {
         const val = r[colMap.type].toString().trim().toLowerCase();
         if (val.startsWith('stud') || val === 's') {
           type = 'Student';
+          resolved = true;
         } else if (val.startsWith('fac') || val === 'f' || val.startsWith('teach') || val.startsWith('prof')) {
           type = 'Faculty';
+          resolved = true;
         }
-      } else {
-        if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(rawReg)) {
+      }
+      
+      if (!resolved) {
+        const cleanReg = rawReg.replace(/[\s-]/g, '').toUpperCase();
+        if (/^[0-9]{2}[A-Z]{3}[0-9]{4}$/.test(cleanReg)) {
           type = 'Student';
-        } else if (/^[0-9]{5}$/.test(rawReg)) {
+        } else if (/^[0-9]{5}$/.test(cleanReg)) {
           type = 'Faculty';
         }
       }
