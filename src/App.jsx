@@ -71,6 +71,84 @@ async function fetchImageAsBase64(url) {
   }
 }
 
+// Smart column headers auto-detector based on keywords and data values
+const detectColumns = (headers, rows) => {
+  let bestNameCol = '';
+  let bestRegCol = '';
+  let bestTypeCol = '';
+
+  const sampleRows = rows.slice(0, 15);
+
+  const scores = headers.reduce((acc, h) => {
+    acc[h] = { name: 0, reg: 0, type: 0 };
+    return acc;
+  }, {});
+
+  headers.forEach(h => {
+    const hLower = h.toLowerCase().trim();
+    
+    if (['name', 'student name', 'full name', 'participant name', 'candidate name', 'member name'].some(k => hLower.includes(k))) {
+      scores[h].name += 10;
+    }
+    if (['reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id', 'roll no', 'rollno', 'register number'].some(k => hLower.includes(k))) {
+      scores[h].reg += 10;
+    }
+    if (['type', 'category', 'role', 'status', 'participant type'].some(k => hLower.includes(k))) {
+      scores[h].type += 10;
+    }
+
+    let regMatches = 0;
+    let nameMatches = 0;
+    let typeMatches = 0;
+
+    sampleRows.forEach(r => {
+      const val = (r[h] || '').toString().trim();
+      if (!val) return;
+
+      if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(val) || /^[0-9]{5}$/.test(val)) {
+        regMatches++;
+      }
+      if (/^[a-zA-Z\s\.]{3,50}$/.test(val) && !['student', 'faculty', 'external', 'yes', 'no', 'true', 'false', 'scope'].includes(val.toLowerCase())) {
+        nameMatches++;
+      }
+      if (['student', 'faculty', 'external', 's', 'f', 'e', 'staff', 'guest'].includes(val.toLowerCase())) {
+        typeMatches++;
+      }
+    });
+
+    const total = sampleRows.filter(r => (r[h] || '').toString().trim()).length;
+    if (total > 0) {
+      scores[h].reg += (regMatches / total) * 15;
+      scores[h].name += (nameMatches / total) * 8;
+      scores[h].type += (typeMatches / total) * 15;
+    }
+  });
+
+  let maxNameScore = -1;
+  let maxRegScore = -1;
+  let maxTypeScore = -1;
+
+  headers.forEach(h => {
+    if (scores[h].name > maxNameScore) {
+      maxNameScore = scores[h].name;
+      bestNameCol = h;
+    }
+    if (scores[h].reg > maxRegScore) {
+      maxRegScore = scores[h].reg;
+      bestRegCol = h;
+    }
+    if (scores[h].type > maxTypeScore) {
+      maxTypeScore = scores[h].type;
+      bestTypeCol = h;
+    }
+  });
+
+  if (!bestNameCol && headers.length > 0) bestNameCol = headers[1] || headers[0];
+  if (!bestRegCol && headers.length > 0) bestRegCol = headers[0];
+
+  return { name: bestNameCol, reg: bestRegCol, type: bestTypeCol };
+};
+
 // Loading fallback component
 const LoadingFallback = () => (
   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', width: '100%' }}>
@@ -283,6 +361,9 @@ export default function App() {
     description: '',
     attendanceFileName: '',
     attendanceData: [],
+    attendanceRawHeaders: [],
+    attendanceRawRows: [],
+    attendanceColumnMap: { name: '', reg: '', type: '' },
     images: [], // array of base64 images
     brochureImage: null, // base64 brochure
     financeEnabled: false,
@@ -365,6 +446,52 @@ export default function App() {
       sessionStorage.setItem('mic_report_draft', JSON.stringify(formData));
     }
   }, [formData, view]);
+
+  // Reactive mapping of raw attendance rows to mapped attendanceData based on selected columns
+  useEffect(() => {
+    const rawRows = formData.attendanceRawRows || [];
+    const colMap = formData.attendanceColumnMap || {};
+    
+    if (rawRows.length === 0 || !colMap.name || !colMap.reg) {
+      return;
+    }
+
+    const mapped = rawRows.map(r => {
+      const rawReg = (r[colMap.reg] || '').toString().trim();
+      const rawName = (r[colMap.name] || '').toString().trim();
+      
+      let type = 'External';
+      if (colMap.type && r[colMap.type]) {
+        const val = r[colMap.type].toString().trim().toLowerCase();
+        if (val.startsWith('stud') || val === 's') {
+          type = 'Student';
+        } else if (val.startsWith('fac') || val === 'f' || val.startsWith('teach') || val.startsWith('prof')) {
+          type = 'Faculty';
+        }
+      } else {
+        if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(rawReg)) {
+          type = 'Student';
+        } else if (/^[0-9]{5}$/.test(rawReg)) {
+          type = 'Faculty';
+        }
+      }
+
+      return {
+        regNo: rawReg,
+        name: rawName,
+        type: type
+      };
+    }).filter(item => item.name);
+
+    const currentJson = JSON.stringify(formData.attendanceData);
+    const nextJson = JSON.stringify(mapped);
+    if (currentJson !== nextJson) {
+      setFormData(prev => ({
+        ...prev,
+        attendanceData: mapped
+      }));
+    }
+  }, [formData.attendanceRawRows, formData.attendanceColumnMap, formData.attendanceData]);
 
   // Auto calculate end time when start time or duration changes
   useEffect(() => {
@@ -499,6 +626,9 @@ export default function App() {
         description: '',
         attendanceFileName: '',
         attendanceData: [],
+        attendanceRawHeaders: [],
+        attendanceRawRows: [],
+        attendanceColumnMap: { name: '', reg: '', type: '' },
         images: [],
         brochureImage: null,
         financeEnabled: false,
@@ -1438,8 +1568,6 @@ Rules:
     if (!file) return;
 
     setCsvErrors([]);
-    const fileNameLower = file.name.toLowerCase();
-
     const processRows = (rows) => {
       if (rows.length === 0) {
         showToast('File is empty');
@@ -1447,37 +1575,16 @@ Rules:
       }
 
       const headers = Object.keys(rows[0]);
-      let nameCol = headers.find(h => ['name', 'student name', 'full name', 'participant name'].includes(h.toLowerCase().trim()));
-      let regCol = headers.find(h => ['reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id'].includes(h.toLowerCase().trim()));
-      
-      if (!nameCol || !regCol) {
-        nameCol = headers[1] || headers[0];
-        regCol = headers[0];
-      }
-
-      const mapped = rows.map(r => {
-        const rawReg = (r[regCol] || '').toString().trim();
-        let type = 'External';
-        if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(rawReg)) {
-          type = 'Student';
-        } else if (/^[0-9]{5}$/.test(rawReg)) {
-          type = 'Faculty';
-        } else if (!rawReg) {
-          type = '';
-        }
-        return {
-          regNo: rawReg,
-          name: (r[nameCol] || '').toString().trim(),
-          type: type
-        };
-      }).filter(item => item.name);
+      const colMap = detectColumns(headers, rows);
 
       setFormData(prev => ({
         ...prev,
         attendanceFileName: file.name,
-        attendanceData: mapped
+        attendanceRawHeaders: headers,
+        attendanceRawRows: rows,
+        attendanceColumnMap: colMap
       }));
-      showToast(`Parsed ${mapped.length} participants.`);
+      showToast(`Uploaded ${file.name}. Adjust mappings below.`);
     };
 
     if (fileNameLower.endsWith('.csv')) {

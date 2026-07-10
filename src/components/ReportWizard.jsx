@@ -421,10 +421,103 @@ export default function ReportWizard({
             />
 
             {formData.attendanceFileName && (
-              <div style={{ marginTop: 16, padding: 12, backgroundColor: 'var(--bg)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span style={{ fontSize: 14, fontWeight: 500 }}>{formData.attendanceFileName}</span>
-                <span className="badge badge-success">{formData.attendanceData.length} participants</span>
-              </div>
+              <>
+                <div style={{ marginTop: 16, padding: 12, backgroundColor: 'var(--bg)', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: 14, fontWeight: 500 }}>{formData.attendanceFileName}</span>
+                  <span className="badge badge-success">{formData.attendanceData.length} participants matched</span>
+                </div>
+
+                {formData.attendanceRawHeaders && formData.attendanceRawHeaders.length > 0 && (
+                  <div style={{ marginTop: 20, padding: 16, border: '1px solid var(--border-light)', borderRadius: 'var(--radius-lg)', backgroundColor: 'var(--card-bg)' }}>
+                    <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--text-secondary)' }}>Fuzzy Smart Column Mapping</h3>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Name Column</label>
+                        <select 
+                          className="form-input" 
+                          style={{ fontSize: 13, height: 38, padding: '0 8px' }}
+                          value={formData.attendanceColumnMap?.name || ''}
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            attendanceColumnMap: { ...prev.attendanceColumnMap, name: e.target.value }
+                          }))}
+                        >
+                          {formData.attendanceRawHeaders.map(h => (
+                            <option key={h} value={h}>{h}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Registration / ID Column</label>
+                        <select 
+                          className="form-input"
+                          style={{ fontSize: 13, height: 38, padding: '0 8px' }}
+                          value={formData.attendanceColumnMap?.reg || ''}
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            attendanceColumnMap: { ...prev.attendanceColumnMap, reg: e.target.value }
+                          }))}
+                        >
+                          {formData.attendanceRawHeaders.map(h => (
+                            <option key={h} value={h}>{h}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="form-group" style={{ marginBottom: 0 }}>
+                        <label className="form-label" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)' }}>Participant Type Column</label>
+                        <select 
+                          className="form-input"
+                          style={{ fontSize: 13, height: 38, padding: '0 8px' }}
+                          value={formData.attendanceColumnMap?.type || ''}
+                          onChange={(e) => setFormData(prev => ({
+                            ...prev,
+                            attendanceColumnMap: { ...prev.attendanceColumnMap, type: e.target.value }
+                          }))}
+                        >
+                          <option value="">-- Pattern Auto-detect --</option>
+                          {formData.attendanceRawHeaders.map(h => (
+                            <option key={h} value={h}>{h}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {formData.attendanceData && formData.attendanceData.length > 0 && (
+                      <div style={{ marginTop: 20 }}>
+                        <h4 style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: 'var(--text-secondary)' }}>Interactive Table Preview (Top 5 rows)</h4>
+                        <div style={{ overflowX: 'auto', border: '1px solid var(--border-light)', borderRadius: 'var(--radius-md)' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, textAlign: 'left' }}>
+                            <thead>
+                              <tr style={{ backgroundColor: 'var(--bg)', borderBottom: '1px solid var(--border-light)' }}>
+                                <th style={{ padding: '8px 12px', fontWeight: 500, width: 60 }}>S.No</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 500 }}>Name</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 500 }}>Registration No</th>
+                                <th style={{ padding: '8px 12px', fontWeight: 500 }}>Type</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {formData.attendanceData.slice(0, 5).map((p, idx) => (
+                                <tr key={idx} style={{ borderBottom: '1px solid var(--border-light)' }}>
+                                  <td style={{ padding: '8px 12px', color: 'var(--text-secondary)' }}>{idx + 1}</td>
+                                  <td style={{ padding: '8px 12px', fontWeight: 500 }}>{p.name}</td>
+                                  <td style={{ padding: '8px 12px', fontFamily: 'var(--font-mono)' }}>{p.regNo}</td>
+                                  <td style={{ padding: '8px 12px' }}>
+                                    <span className={`badge ${p.type === 'Student' ? 'badge-info' : p.type === 'Faculty' ? 'badge-success' : 'badge-secondary'}`}>
+                                      {p.type}
+                                    </span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
             {csvErrors.length > 0 && (
