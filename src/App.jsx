@@ -1600,6 +1600,65 @@ Rules:
     if (!file) return;
 
     setCsvErrors([]);
+    const fileNameLower = file.name.toLowerCase();
+
+    // Helper to convert 2D array grid to objects starting from detected header row
+    const convert2DToObjects = (grid) => {
+      if (!grid || grid.length === 0) return [];
+
+      let headerRowIndex = 0;
+      let maxHeaderScore = -1;
+
+      // Scan first 15 rows to find the best header candidate
+      for (let i = 0; i < Math.min(grid.length, 15); i++) {
+        const row = grid[i];
+        if (!row || row.length === 0) continue;
+
+        let score = 0;
+        row.forEach(cell => {
+          if (cell === null || cell === undefined) return;
+          const val = cell.toString().toLowerCase().trim();
+          if (['name', 'student name', 'full name', 'participant name', 'reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id', 'roll no', 'rollno', 'register number', 'sl. no', 'sl no', 's.no', 'sno'].some(k => val.includes(k))) {
+            score++;
+          }
+        });
+
+        if (score > maxHeaderScore) {
+          maxHeaderScore = score;
+          headerRowIndex = i;
+        }
+      }
+
+      // Default fallback to first non-empty row if no header matched
+      if (maxHeaderScore <= 0) {
+        for (let i = 0; i < grid.length; i++) {
+          if (grid[i] && grid[i].length > 0 && grid[i].some(c => c !== '' && c !== null && c !== undefined)) {
+            headerRowIndex = i;
+            break;
+          }
+        }
+      }
+
+      const rawHeaders = grid[headerRowIndex] || [];
+      const cleanHeaders = rawHeaders.map((h, idx) => (h || '').toString().trim() || `Column_${idx + 1}`);
+
+      const rows = [];
+      for (let i = headerRowIndex + 1; i < grid.length; i++) {
+        const rowData = grid[i];
+        if (!rowData || rowData.length === 0 || rowData.every(c => c === '' || c === null || c === undefined)) {
+          continue; // Skip empty rows
+        }
+
+        const obj = {};
+        cleanHeaders.forEach((h, idx) => {
+          obj[h] = rowData[idx] !== undefined ? rowData[idx] : '';
+        });
+        rows.push(obj);
+      }
+
+      return rows;
+    };
+
     const processRows = (rows) => {
       if (rows.length === 0) {
         showToast('File is empty');
@@ -1621,10 +1680,11 @@ Rules:
 
     if (fileNameLower.endsWith('.csv')) {
       Papa.parse(file, {
-        header: true,
+        header: false, // Parse as 2D array grid first
         skipEmptyLines: true,
         complete: (results) => {
-          processRows(results.data);
+          const rows = convert2DToObjects(results.data);
+          processRows(rows);
         },
         error: () => {
           showToast('Error parsing CSV file');
@@ -1638,7 +1698,8 @@ Rules:
           const workbook = XLSX.read(data, { type: 'array' });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
-          const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+          const grid = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+          const rows = convert2DToObjects(grid);
           processRows(rows);
         } catch (error) {
           showToast('Error parsing Excel file');
