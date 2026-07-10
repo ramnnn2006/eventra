@@ -216,31 +216,31 @@ export default function App() {
     document.body.className = theme === 'dark' ? 'dark-theme' : '';
   }, [theme]);
 
-  // Load user settings from Convex
+  // Load user settings from Convex (only if different to prevent local state loops)
   useEffect(() => {
     if (convexDb && convexDb.userSettings) {
-      if (convexDb.userSettings.theme) {
+      if (convexDb.userSettings.theme && convexDb.userSettings.theme !== theme) {
         setTheme(convexDb.userSettings.theme);
       }
-      if (convexDb.userSettings.accent) {
+      if (convexDb.userSettings.accent && (
+        convexDb.userSettings.accent.name !== accent.name ||
+        convexDb.userSettings.accent.h !== accent.h ||
+        convexDb.userSettings.accent.s !== accent.s ||
+        convexDb.userSettings.accent.l !== accent.l
+      )) {
         setAccent(convexDb.userSettings.accent);
       }
     }
-  }, [convexDb]);
-
-  // Save theme to Convex
+  }, [convexDb, theme, accent]);
+ 
+  // Initialize default data in Convex on first load (loop-guarded)
+  const [hasInitializedDefaults, setHasInitializedDefaults] = useState(false);
   useEffect(() => {
-    if (convexDb && convexDb.setUserSettings) {
-      convexDb.setUserSettings(theme, accent);
-    }
-  }, [theme, accent, convexDb]);
-
-  // Initialize default data in Convex on first load
-  useEffect(() => {
-    if (convexDb && convexDb.initializeDefaults) {
+    if (convexDb && convexDb.initializeDefaults && !hasInitializedDefaults) {
+      setHasInitializedDefaults(true);
       convexDb.initializeDefaults();
     }
-  }, [convexDb]);
+  }, [convexDb, hasInitializedDefaults]);
 
   // Load draft from sessionStorage on mount
   useEffect(() => {
@@ -424,6 +424,22 @@ export default function App() {
       return '';
     }
   };
+
+  // Callback-driven theme and accent setters to prevent recursive useEffect save loops
+  const handleAccentChange = useCallback((color) => {
+    setAccent(color);
+    if (convexDb && convexDb.setUserSettings) {
+      convexDb.setUserSettings(theme, color);
+    }
+  }, [theme, convexDb]);
+
+  const handleThemeToggle = useCallback(() => {
+    const nextTheme = theme === 'light' ? 'dark' : 'light';
+    setTheme(nextTheme);
+    if (convexDb && convexDb.setUserSettings) {
+      convexDb.setUserSettings(nextTheme, accent);
+    }
+  }, [theme, accent, convexDb]);
 
   // Auth Action
   const handleLogin = useCallback((e) => {
@@ -1513,7 +1529,7 @@ Rules:
                 key={color.name}
                 className={`accent-dot ${accent.name === color.name ? 'active' : ''}`}
                 style={{ backgroundColor: `hsl(${color.h}, ${color.s}%, ${color.l}%)` }}
-                onClick={() => setAccent(color)}
+                onClick={() => handleAccentChange(color)}
               />
             ))}
           </div>
@@ -1521,7 +1537,7 @@ Rules:
           {/* Theme Mode Toggle */}
           <button 
             className="btn btn-secondary" 
-            onClick={() => setTheme(theme === 'light' ? 'dark' : 'light')}
+            onClick={handleThemeToggle}
             style={{ display: 'flex', alignItems: 'center', padding: '6px 12px', fontSize: 13, cursor: 'pointer' }}
           >
             <span>{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
