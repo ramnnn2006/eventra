@@ -708,7 +708,7 @@ export default function App() {
           sl_no: idx + 1,
           reg_no: p.regNo,
           name: p.name,
-          type: p.type === 'Student' ? 'S' : p.type === 'Faculty' ? 'F' : p.type === 'External' ? 'E' : ''
+          type: p.type === 'Student' ? 'Student' : p.type === 'Faculty' ? 'Faculty' : p.type === 'External' ? 'External' : ''
         })),
         
         has_finance: formData.financeEnabled,
@@ -716,7 +716,7 @@ export default function App() {
         revenue: formData.financeEnabled ? formData.finance.revenue : '',
         remarks: formData.financeEnabled ? formData.finance.remarks : '',
 
-        brochure_img: formData.brochureImage ? '[Event Brochure / Flyer Attached]' : '[No Brochure Flyer Attached]',
+        brochure_img: formData.brochureImage ? '[Event Brochure / Poster Attached]' : '[No Brochure Poster Attached]',
         images: formData.images && formData.images.length > 0 
           ? formData.images.map((_, i) => ({ img: `[Event Execution Photo ${i + 1} Attached]` })) 
           : [{ img: '[No Event Execution Photos Attached]' }],
@@ -947,7 +947,7 @@ export default function App() {
               <td>${idx + 1}</td>
               <td>${escapeHtml(p.regNo || '')}</td>
               <td>${escapeHtml(p.name || '')}</td>
-              <td>${p.type === 'Student' ? 'S' : p.type === 'Faculty' ? 'F' : p.type === 'External' ? 'E' : ''}</td>
+               <td>${p.type === 'Student' ? 'Student' : p.type === 'Faculty' ? 'Faculty' : p.type === 'External' ? 'External' : ''}</td>
             </tr>
           `).join('')}
         </table>

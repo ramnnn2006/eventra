@@ -530,17 +530,17 @@ export default function ReportWizard({
           </div>
         )}
 
-        {/* Step 5: Brochure & Images */}
+        {/* Step 5: Poster & Images */}
         {step === 5 && (
           <div>
-            <h2 className="step-question">Photos and brochure</h2>
-            <p className="step-description">Upload the event flyer and photos from the event (optional).</p>
+            <h2 className="step-question">Photos and poster</h2>
+            <p className="step-description">Upload the event poster and photos from the event (optional).</p>
             
             <div className="form-group" style={{ marginBottom: 24 }}>
-              <label className="form-label">Event Brochure / Flyer</label>
+              <label className="form-label">Event Poster</label>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => brochureInputRef.current?.click()}>
-                  Upload Brochure Image
+                  Upload Poster Image
                 </button>
                 <input 
                   type="file" 
@@ -550,7 +550,7 @@ export default function ReportWizard({
                   style={{ display: 'none' }}
                 />
                 {formData.brochureImage && (
-                  <span className="badge badge-success">Brochure Selected</span>
+                  <span className="badge badge-success">Poster Selected</span>
                 )}
               </div>
             </div>

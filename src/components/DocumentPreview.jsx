@@ -147,7 +147,7 @@ export default function DocumentPreview({
               Brochure / Circular of the Event / Programme Schedule
             </div>
             <div style={{ textAlign: 'center' }}>
-              <img src={formData.brochureImage} alt="Event Flyer" style={{ maxWidth: '60%', height: 'auto', border: '1px solid #ddd' }} />
+              <img src={formData.brochureImage} alt="Event Poster" style={{ maxWidth: '60%', height: 'auto', border: '1px solid #ddd' }} />
             </div>
           </div>
         )}
