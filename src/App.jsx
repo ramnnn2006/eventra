@@ -873,7 +873,7 @@ export default function App() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     showToast('Full report generated & saved to database.');
-  }, [formData, coordinatorsList, logos, convexDb, showToast]);
+  }, [formData, coordinatorsList, logosList, convexDb, showToast]);
 
   // Direct completed report upload
   const handleCompletedReportUpload = useCallback(async (e) => {
