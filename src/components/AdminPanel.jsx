@@ -105,11 +105,11 @@ export default function AdminPanel({
             <div className="admin-page-header">
               <h1 className="admin-page-title">Saved reports</h1>
               <span style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>
-                {uploadedReportsList.length} reports total
+                {uploadedReportsList?.length || 0} reports total
               </span>
             </div>
             <div className="admin-card">
-              {uploadedReportsList.length > 0 ? (
+              {(uploadedReportsList || []).length > 0 ? (
                 <table className="admin-table">
                   <thead>
                     <tr>
@@ -121,7 +121,7 @@ export default function AdminPanel({
                     </tr>
                   </thead>
                   <tbody>
-                    {uploadedReportsList.map(rep => {
+                    {(uploadedReportsList || []).map(rep => {
                       const eventName = rep.eventName || rep.title || 'Event Report';
                       const filename = rep.filename || rep.fileName || 'report.docx';
                       const uploadDate = rep.uploadDate || rep.uploadedAt || 'Today';
@@ -243,7 +243,7 @@ export default function AdminPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {coordinatorsList.map(c => (
+                  {(coordinatorsList || []).map(c => (
                     <tr key={c._id || c.empId}>
                       <td>{c.empId}</td>
                       <td style={{ fontWeight: 500 }}>{c.name}</td>
@@ -292,7 +292,7 @@ export default function AdminPanel({
                 </div>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-                  {eventTypesRaw.map(t => {
+                  {(eventTypesRaw || []).map(t => {
                     const name = typeof t === 'object' ? t.name : t;
                     const id = typeof t === 'object' ? t._id : t;
                     return (
@@ -323,7 +323,7 @@ export default function AdminPanel({
                 </div>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 240, overflowY: 'auto' }}>
-                  {venuesRaw.map(v => {
+                  {(venuesRaw || []).map(v => {
                     const name = typeof v === 'object' ? v.name : v;
                     const id = typeof v === 'object' ? v._id : v;
                     return (
@@ -406,7 +406,7 @@ export default function AdminPanel({
             <div className="admin-card">
               <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 16 }}>Available Logos</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 16 }}>
-                {logos.map(logo => (
+                {(logos || []).map(logo => (
                   <div key={logo.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 16, border: '1px solid var(--border-light)', borderRadius: 8, backgroundColor: 'var(--bg)', position: 'relative' }}>
                     <img src={logo.dataUrl || logo.src} alt={logo.name} style={{ height: 60, objectFit: 'contain', marginBottom: 12 }} />
                     <span style={{ fontSize: 13, fontWeight: 500, textAlign: 'center', marginBottom: 4 }}>{logo.name}</span>

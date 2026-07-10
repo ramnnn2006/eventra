@@ -1724,139 +1724,140 @@ Rules:
       </nav>
 
       {/* Main layout */}
-      <main className="main-content">
+      {userRole === 'admin' && (currentPath === '/admin' || currentPath === '/mic') ? (
         <React.Suspense fallback={<LoadingFallback />}>
-          {/* Unauthenticated views */}
-          {!userRole && (
-            <>
-              {/* Root landing page for unauthenticated users */}
-              {(currentPath === '/' || currentPath === '') && (
-                <PortalLanding navigate={navigate} />
-              )}
-
-              {/* Login page */}
-              {(currentPath === '/login' || currentPath === '/user' || currentPath === '/admin') && (
-                <LoginCard 
-                  username={username}
-                  setUsername={setUsername}
-                  password={password}
-                  setPassword={setPassword}
-                  handleLogin={handleLogin}
-                />
-              )}
-            </>
-          )}
-
-          {/* Authenticated views */}
-          {userRole && (
-            <>
-              {/* Redirect root to appropriate dashboard */}
-              {currentPath === '/' && (
-                userRole === 'admin' ? navigate('/admin') : navigate('/user')
-              )}
-
-              {/* VIEW: ADMIN INTERFACE */}
-              {(currentPath === '/admin' || currentPath === '/mic') && userRole === 'admin' && (
-                <AdminPanel
-                  adminSection={adminSection}
-                  setAdminSection={setAdminSection}
-                  uploadedReports={uploadedReportsList}
-                  uploadedReportsList={uploadedReportsList}
-                  deleteReport={deleteReport}
-                  coordinators={coordinatorsList}
-                  coordinatorsList={coordinatorsList}
-                  newFaculty={newFaculty}
-                  setNewFaculty={setNewFaculty}
-                  handleAddFaculty={handleAddFaculty}
-                  facSigInputRef={facSigInputRef}
-                  handleFacultySignatureUpload={handleFacultySignatureUpload}
-                  deleteFaculty={deleteFaculty}
-                  newVenue={newVenue}
-                  setNewVenue={setNewVenue}
-                  addVenue={addVenue}
-                  venuesRaw={venuesRaw}
-                  deleteVenue={deleteVenue}
-                  newEventType={newEventType}
-                  setNewEventType={setNewEventType}
-                  addEventType={addEventType}
-                  eventTypesRaw={eventTypesRaw}
-                  deleteEventType={deleteEventType}
-                  templateInputRef={templateInputRef}
-                  handleTemplateUpload={handleTemplateUpload}
-                  logos={logosList}
-                  logoInputRef={logoInputRef}
-                  handleLogoUpload={handleLogoUpload}
-                  deleteLogo={deleteLogo}
-                  showToast={showToast}
-                />
-              )}
-
-              {/* VIEW: COORDINATOR WORKSPACE (Path /user) */}
-              {currentPath === '/user' && (
-                <>
-                  {view === 'landing' && (
-                    <CoordinatorLanding
-                      setView={setView}
-                      docxInputRef={docxInputRef}
-                      handleCompletedReportUpload={handleCompletedReportUpload}
-                    />
-                  )}
-
-                  {view === 'create' && (
-                    <ReportWizard
-                      formData={formData}
-                      setFormData={setFormData}
-                      step={step}
-                      setStep={setStep}
-                      setView={setView}
-                      validationErrors={validationErrors}
-                      setValidationErrors={setValidationErrors}
-                      coordinatorsList={coordinatorsList}
-                      venuesList={venuesList}
-                      eventTypesList={eventTypesList}
-                      smartFillFlags={smartFillFlags}
-                      refinementLoading={refinementLoading}
-                      handleRefineReportText={handleRefineReportText}
-                      csvInputRef={csvInputRef}
-                      handleCSVUpload={handleAttendanceUpload}
-                      csvErrors={csvErrors}
-                      brochureInputRef={brochureInputRef}
-                      handleBrochureUpload={handleBrochureUpload}
-                      imagesInputRef={imagesInputRef}
-                      handleImagesUpload={handleImagesUpload}
-                      discardDraft={discardDraft}
-                      showToast={showToast}
-                      logos={logosList}
-                    />
-                  )}
-
-                  {view === 'review' && (
-                    <ReviewSummary
-                      formData={formData}
-                      setFormData={setFormData}
-                      setView={setView}
-                      setStep={setStep}
-                      coordinators={coordinatorsList}
-                      discardDraft={discardDraft}
-                    />
-                  )}
-
-                  {view === 'preview' && (
-                    <DocumentPreview
-                      formData={formData}
-                      setView={setView}
-                      generateDocxFile={generateDocxFile}
-                      generateRichWordDoc={generateRichWordDoc}
-                      coordinators={coordinatorsList}
-                      logos={logosList}
-                    />
-                  )}
-                </>
-              )}
-            </>
-          )}
+          <AdminPanel
+            adminSection={adminSection}
+            setAdminSection={setAdminSection}
+            uploadedReports={uploadedReportsList}
+            uploadedReportsList={uploadedReportsList}
+            deleteReport={deleteReport}
+            coordinators={coordinatorsList}
+            coordinatorsList={coordinatorsList}
+            newFaculty={newFaculty}
+            setNewFaculty={setNewFaculty}
+            handleAddFaculty={handleAddFaculty}
+            facSigInputRef={facSigInputRef}
+            handleFacultySignatureUpload={handleFacultySignatureUpload}
+            deleteFaculty={deleteFaculty}
+            newVenue={newVenue}
+            setNewVenue={setNewVenue}
+            addVenue={addVenue}
+            venuesRaw={venuesRaw}
+            deleteVenue={deleteVenue}
+            newEventType={newEventType}
+            setNewEventType={setNewEventType}
+            addEventType={addEventType}
+            eventTypesRaw={eventTypesRaw}
+            deleteEventType={deleteEventType}
+            templateInputRef={templateInputRef}
+            handleTemplateUpload={handleTemplateUpload}
+            logos={logosList}
+            logoInputRef={logoInputRef}
+            handleLogoUpload={handleLogoUpload}
+            deleteLogo={deleteLogo}
+            showToast={showToast}
+          />
         </React.Suspense>
-      </main>
+      ) : (
+        <main className="main-content">
+          <React.Suspense fallback={<LoadingFallback />}>
+            {/* Unauthenticated views */}
+            {!userRole && (
+              <>
+                {/* Root landing page for unauthenticated users */}
+                {(currentPath === '/' || currentPath === '') && (
+                  <PortalLanding navigate={navigate} />
+                )}
+
+                {/* Login page */}
+                {(currentPath === '/login' || currentPath === '/user' || currentPath === '/admin') && (
+                  <LoginCard 
+                    username={username}
+                    setUsername={setUsername}
+                    password={password}
+                    setPassword={setPassword}
+                    handleLogin={handleLogin}
+                  />
+                )}
+              </>
+            )}
+
+            {/* Authenticated coordinator views */}
+            {userRole && (
+              <>
+                {/* Redirect root to appropriate dashboard */}
+                {currentPath === '/' && (
+                  userRole === 'admin' ? navigate('/admin') : navigate('/user')
+                )}
+
+                {/* VIEW: COORDINATOR WORKSPACE (Path /user) */}
+                {currentPath === '/user' && (
+                  <>
+                    {view === 'landing' && (
+                      <CoordinatorLanding
+                        setView={setView}
+                        docxInputRef={docxInputRef}
+                        handleCompletedReportUpload={handleCompletedReportUpload}
+                      />
+                    )}
+
+                    {view === 'create' && (
+                      <ReportWizard
+                        formData={formData}
+                        setFormData={setFormData}
+                        step={step}
+                        setStep={setStep}
+                        setView={setView}
+                        validationErrors={validationErrors}
+                        setValidationErrors={setValidationErrors}
+                        coordinatorsList={coordinatorsList}
+                        venuesList={venuesList}
+                        eventTypesList={eventTypesList}
+                        smartFillFlags={smartFillFlags}
+                        refinementLoading={refinementLoading}
+                        handleRefineReportText={handleRefineReportText}
+                        csvInputRef={csvInputRef}
+                        handleCSVUpload={handleAttendanceUpload}
+                        csvErrors={csvErrors}
+                        brochureInputRef={brochureInputRef}
+                        handleBrochureUpload={handleBrochureUpload}
+                        imagesInputRef={imagesInputRef}
+                        handleImagesUpload={handleImagesUpload}
+                        discardDraft={discardDraft}
+                        showToast={showToast}
+                        logos={logosList}
+                      />
+                    )}
+
+                    {view === 'review' && (
+                      <ReviewSummary
+                        formData={formData}
+                        setFormData={setFormData}
+                        setView={setView}
+                        setStep={setStep}
+                        coordinators={coordinatorsList}
+                        discardDraft={discardDraft}
+                      />
+                    )}
+
+                    {view === 'preview' && (
+                      <DocumentPreview
+                        formData={formData}
+                        setView={setView}
+                        generateDocxFile={generateDocxFile}
+                        generateRichWordDoc={generateRichWordDoc}
+                        coordinators={coordinatorsList}
+                        logos={logosList}
+                      />
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </React.Suspense>
+        </main>
+      )}
 
       {/* Refined text comparison modal */}
       {showRefineModal && (
