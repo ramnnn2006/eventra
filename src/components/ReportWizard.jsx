@@ -533,12 +533,12 @@ export default function ReportWizard({
         {step === 5 && (
           <div>
             <h2 className="step-question">Photos and brochure</h2>
-            <p className="step-description">Upload the event flyer and at least 2 photos from the event.</p>
+            <p className="step-description">Upload the event flyer and photos from the event (optional).</p>
             
             <div className="form-group" style={{ marginBottom: 24 }}>
               <label className="form-label">Event Brochure / Flyer</label>
               <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
-                <button className="btn btn-secondary" onClick={() => brochureInputRef.current?.click()}>
+                <button type="button" className="btn btn-secondary" onClick={() => brochureInputRef.current?.click()}>
                   Upload Brochure Image
                 </button>
                 <input 
@@ -555,8 +555,8 @@ export default function ReportWizard({
             </div>
 
             <div className="form-group">
-              <label className="form-label">Event Photos (at least 2)</label>
-              <button className="btn btn-secondary" onClick={() => imagesInputRef.current?.click()}>
+              <label className="form-label">Event Photos (Optional)</label>
+              <button type="button" className="btn btn-secondary" onClick={() => imagesInputRef.current?.click()}>
                 Upload Event Photos
               </button>
               <input 
@@ -658,6 +658,7 @@ export default function ReportWizard({
 
       <div className="wizard-footer">
         <button 
+          type="button"
           className="btn btn-secondary" 
           onClick={step === 1 ? discardDraft : () => setStep(step - 1)}
         >
@@ -665,6 +666,7 @@ export default function ReportWizard({
         </button>
         
         <button 
+          type="button"
           className="btn btn-primary" 
           onClick={() => {
             if (step === 1) {
@@ -703,12 +705,8 @@ export default function ReportWizard({
               }
             }
 
-            if (step === 5) {
-              if (formData.images.length < 2) {
-                showToast('Please upload at least 2 event photos');
-                return;
-              }
-            }
+            // Step 5: Photos (Now completely optional)
+            // No strict photo count check required
 
             if (step === 6) {
               setView('review');

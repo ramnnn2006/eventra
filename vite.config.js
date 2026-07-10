@@ -4,6 +4,11 @@ import react from '@vitejs/plugin-react'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    watch: {
+      ignored: ['**/dist/**', '**/node_modules/**', '**/*.docx', '**/*.doc', '**/*.png', '**/*.jpg', '**/*.csv', '**/*.xlsx', '**/*.xls']
+    }
+  },
   build: {
     rollupOptions: {
       output: {
