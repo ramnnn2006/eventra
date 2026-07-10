@@ -343,9 +343,11 @@ export default function App() {
       navigate(userRole === 'admin' ? '/admin' : '/user');
     } else if (currentPath === '/admin' && userRole !== 'admin') {
       navigate('/');
-      showToast('Access denied: Administrator role required');
+      if (userRole) showToast('Access denied: Administrator role required');
     } else if (currentPath === '/user' && !userRole) {
       navigate('/');
+    } else if (currentPath === '/login' && userRole) {
+      navigate(userRole === 'admin' ? '/admin' : '/user');
     }
   }, [currentPath, userRole, navigate]);
 
@@ -1544,17 +1546,31 @@ Rules:
       {/* Main layout */}
       <main className="main-content">
         <React.Suspense fallback={<LoadingFallback />}>
-          {!userRole ? (
-            <LoginCard 
-              username={username}
-              setUsername={setUsername}
-              password={password}
-              setPassword={setPassword}
-              handleLogin={handleLogin}
-            />
-          ) : (
+          {/* Unauthenticated views */}
+          {!userRole && (
             <>
-              {/* VIEW: PORTAL/LANDING for logged-in user at root path */}
+              {/* Root landing page for unauthenticated users */}
+              {(currentPath === '/' || currentPath === '') && (
+                <PortalLanding navigate={navigate} />
+              )}
+
+              {/* Login page */}
+              {(currentPath === '/login' || currentPath === '/user' || currentPath === '/admin') && (
+                <LoginCard 
+                  username={username}
+                  setUsername={setUsername}
+                  password={password}
+                  setPassword={setPassword}
+                  handleLogin={handleLogin}
+                />
+              )}
+            </>
+          )}
+
+          {/* Authenticated views */}
+          {userRole && (
+            <>
+              {/* Redirect root to appropriate dashboard */}
               {currentPath === '/' && (
                 userRole === 'admin' ? navigate('/admin') : navigate('/user')
               )}
@@ -1564,9 +1580,10 @@ Rules:
                 <AdminPanel
                   adminSection={adminSection}
                   setAdminSection={setAdminSection}
-                  uploadedReports={uploadedReports}
+                  uploadedReports={uploadedReportsList}
                   uploadedReportsList={uploadedReportsList}
                   deleteReport={deleteReport}
+                  coordinators={coordinatorsList}
                   coordinatorsList={coordinatorsList}
                   newFaculty={newFaculty}
                   setNewFaculty={setNewFaculty}

@@ -14,7 +14,7 @@ export default function PortalLanding({ navigate }) {
           Fill in your event details, upload attendance, and get a formatted VIT Chennai report as a Word doc. That's it.
         </p>
         <div className="landing-hero-actions" style={{ marginTop: 12 }}>
-          <button className="btn btn-primary" onClick={() => navigate('/user')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 28px', fontSize: 16, cursor: 'pointer' }}>
+          <button className="btn btn-primary" onClick={() => navigate('/login')} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '14px 28px', fontSize: 16, cursor: 'pointer' }}>
             <span>Get Started</span>
             <ArrowRight size={18} />
           </button>
