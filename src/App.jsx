@@ -1322,12 +1322,28 @@ ${text}`;
       if (!response.ok) throw new Error('API request failed');
 
       const data = await response.json();
-      const raw = data.choices[0].message.content.trim();
+      let raw = data.choices[0].message.content.trim();
+      
+      // Robust JSON extraction
+      if (raw.includes('```')) {
+        const matches = raw.match(/```(?:json)?([\s\S]*?)```/);
+        if (matches && matches[1]) {
+          raw = matches[1].trim();
+        }
+      }
+      
+      const firstCurly = raw.indexOf('{');
+      const lastCurly = raw.lastIndexOf('}');
+      if (firstCurly !== -1 && lastCurly !== -1) {
+        raw = raw.substring(firstCurly, lastCurly + 1);
+      }
+
       let parsed;
       try {
         parsed = JSON.parse(raw);
-      } catch {
-        showToast("Couldn't parse that. Try being more specific.");
+      } catch (err) {
+        console.error("Smart Fill JSON parse error:", err, "Raw text:", raw);
+        showToast("Couldn't parse response. Try being more specific.");
         return;
       }
 
@@ -1444,11 +1460,27 @@ Rules:
       if (!response.ok) throw new Error('API request failed');
 
       const data = await response.json();
-      const raw = data.choices[0].message.content.trim();
+      let raw = data.choices[0].message.content.trim();
+      
+      // Robust JSON extraction
+      if (raw.includes('```')) {
+        const matches = raw.match(/```(?:json)?([\s\S]*?)```/);
+        if (matches && matches[1]) {
+          raw = matches[1].trim();
+        }
+      }
+      
+      const firstCurly = raw.indexOf('{');
+      const lastCurly = raw.lastIndexOf('}');
+      if (firstCurly !== -1 && lastCurly !== -1) {
+        raw = raw.substring(firstCurly, lastCurly + 1);
+      }
+
       let parsed;
       try {
         parsed = JSON.parse(raw);
-      } catch {
+      } catch (err) {
+        console.error("Smart Fill Answer JSON parse error:", err, "Raw text:", raw);
         showToast("Couldn't parse that. Please speak clearly.");
         return;
       }
