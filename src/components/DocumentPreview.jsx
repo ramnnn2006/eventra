@@ -47,7 +47,7 @@ export default function DocumentPreview({
       </div>
 
       <div className="preview-container">
-        {/* Logos Header */}
+        {/* Logos Header (Commented out as requested)
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24, paddingBottom: 16, borderBottom: '1.5pt solid #000' }}>
           {orderedLogos.map((logo) => (
             <img 
@@ -58,6 +58,7 @@ export default function DocumentPreview({
             />
           ))}
         </div>
+        */}
 
         {/* Report Header */}
         <div className="doc-header">Microsoft Innovations Club</div>

@@ -324,7 +324,7 @@ export default function ReportWizard({
               </div>
             )}
 
-            {/* Event Branding / Logos Selection */}
+            {/* Event Branding / Logos Selection (Commented out as requested)
             <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid var(--border-light)' }}>
               <h2 className="step-question">Event branding</h2>
               <p className="step-description">Select optional logos to include on the cover page. VIT Chennai, MIC, and Student Welfare logos are included by default.</p>
@@ -363,6 +363,7 @@ export default function ReportWizard({
                 })}
               </div>
             </div>
+            */}
           </div>
         )}
 
