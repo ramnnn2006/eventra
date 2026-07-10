@@ -18,7 +18,7 @@ export default function ReportWizard({
   refinementLoading,
   handleRefineReportText,
   csvInputRef,
-  handleCSVUpload,
+  handleCSVUpload: handleAttendanceUpload,
   csvErrors,
   brochureInputRef,
   handleBrochureUpload,
@@ -400,23 +400,23 @@ export default function ReportWizard({
           </div>
         )}
 
-        {/* Step 4: Attendance CSV Upload */}
+        {/* Step 4: Attendance File Upload */}
         {step === 4 && (
           <div>
             <h2 className="step-question">Attendance</h2>
-            <p className="step-description">Upload a CSV with participant info. Columns get matched automatically.</p>
+            <p className="step-description">Upload a CSV or Excel (.xlsx, .xls) file with participant info. Columns get matched automatically.</p>
             
             <div className="file-dropzone" onClick={() => csvInputRef.current?.click()}>
               <Upload size={32} className="dropzone-icon" />
-              <p className="dropzone-text">Drop your CSV here, or click to pick a file</p>
-              <p className="dropzone-hint">Accepted file type: .csv</p>
+              <p className="dropzone-text">Drop your CSV or Excel file here, or click to pick a file</p>
+              <p className="dropzone-hint">Accepted file types: .csv, .xlsx, .xls</p>
             </div>
             
             <input 
               type="file" 
               ref={csvInputRef} 
-              onChange={handleCSVUpload} 
-              accept=".csv" 
+              onChange={handleAttendanceUpload} 
+              accept=".csv, .xlsx, .xls" 
               style={{ display: 'none' }}
             />
 

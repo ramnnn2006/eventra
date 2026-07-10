@@ -15,6 +15,9 @@ export default defineConfig({
             if (id.includes('docxtemplater') || id.includes('pizzip') || id.includes('papaparse')) {
               return 'vendor-docx';
             }
+            if (id.includes('xlsx')) {
+              return 'vendor-xlsx';
+            }
             return 'vendor';
           }
         }

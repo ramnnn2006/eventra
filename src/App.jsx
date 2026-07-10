@@ -5,6 +5,7 @@ import {
   RefreshCw, AlertCircle, Eye, Download, Info, Sparkles, Mic
 } from 'lucide-react';
 import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { useQuery, useMutation } from "convex/react";
@@ -1431,75 +1432,99 @@ Rules:
     }
   };
 
-  // CSV uploaded mapper handler
-  const handleCSVUpload = useCallback((e) => {
+  // Attendance list file upload parser (CSV & XLSX support)
+  const handleAttendanceUpload = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setCsvErrors([]);
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        const rows = results.data;
-        if (rows.length === 0) {
-          showToast('CSV is empty');
-          return;
-        }
+    const fileNameLower = file.name.toLowerCase();
 
-        const headers = Object.keys(rows[0]);
-        let nameCol = headers.find(h => ['name', 'student name', 'full name', 'participant name'].includes(h.toLowerCase().trim()));
-        let regCol = headers.find(h => ['reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id'].includes(h.toLowerCase().trim()));
-        
-        if (!nameCol || !regCol) {
-          nameCol = headers[1] || headers[0];
-          regCol = headers[0];
-        }
-
-        const mapped = rows.map(r => {
-          const rawReg = (r[regCol] || '').toString().trim();
-          let type = 'External';
-          if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(rawReg)) {
-            type = 'Student';
-          } else if (/^[0-9]{5}$/.test(rawReg)) {
-            type = 'Faculty';
-          } else if (!rawReg) {
-            type = '';
-          }
-          return {
-            regNo: rawReg,
-            name: (r[nameCol] || '').toString().trim(),
-            type: type
-          };
-        }).filter(item => item.name);
-
-        setFormData(prev => ({
-          ...prev,
-          attendanceFileName: file.name,
-          attendanceData: mapped
-        }));
-        showToast(`Parsed ${mapped.length} participants.`);
-      },
-      error: () => {
-        showToast('Error parsing CSV file');
+    const processRows = (rows) => {
+      if (rows.length === 0) {
+        showToast('File is empty');
+        return;
       }
-    });
+
+      const headers = Object.keys(rows[0]);
+      let nameCol = headers.find(h => ['name', 'student name', 'full name', 'participant name'].includes(h.toLowerCase().trim()));
+      let regCol = headers.find(h => ['reg no', 'registration no', 'reg_no', 'registration_number', 'regno', 'employee id', 'emp id', 'id'].includes(h.toLowerCase().trim()));
+      
+      if (!nameCol || !regCol) {
+        nameCol = headers[1] || headers[0];
+        regCol = headers[0];
+      }
+
+      const mapped = rows.map(r => {
+        const rawReg = (r[regCol] || '').toString().trim();
+        let type = 'External';
+        if (/^[0-9]{2}[a-zA-Z]{3}[0-9]{4}$/.test(rawReg)) {
+          type = 'Student';
+        } else if (/^[0-9]{5}$/.test(rawReg)) {
+          type = 'Faculty';
+        } else if (!rawReg) {
+          type = '';
+        }
+        return {
+          regNo: rawReg,
+          name: (r[nameCol] || '').toString().trim(),
+          type: type
+        };
+      }).filter(item => item.name);
+
+      setFormData(prev => ({
+        ...prev,
+        attendanceFileName: file.name,
+        attendanceData: mapped
+      }));
+      showToast(`Parsed ${mapped.length} participants.`);
+    };
+
+    if (fileNameLower.endsWith('.csv')) {
+      Papa.parse(file, {
+        header: true,
+        skipEmptyLines: true,
+        complete: (results) => {
+          processRows(results.data);
+        },
+        error: () => {
+          showToast('Error parsing CSV file');
+        }
+      });
+    } else if (fileNameLower.endsWith('.xlsx') || fileNameLower.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const data = evt.target.result;
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const rows = XLSX.utils.sheet_to_json(worksheet, { defval: '' });
+          processRows(rows);
+        } catch (error) {
+          showToast('Error parsing Excel file');
+        }
+      };
+      reader.onerror = () => {
+        showToast('Error reading file');
+      };
+      reader.readAsArrayBuffer(file);
+    } else {
+      showToast('Unsupported file format. Please upload .csv or .xlsx');
+    }
     if (csvInputRef.current) csvInputRef.current.value = '';
   }, [showToast]);
-
-  // Full-screen spinner while Convex initial data is loading
-  if (isConvexEnabled && !convexDb) {
-    return (
-      <div className="full-screen-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 16 }}>
-        <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)' }} />
-        <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>Connecting to Convex cloud...</span>
-      </div>
-    );
-  }
 
   // Render variables
   const mainContent = (
     <div className="app-container">
+      {isConvexEnabled && !convexDb ? (
+        <div className="full-screen-spinner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', gap: 16 }}>
+          <RefreshCw size={32} className="spin" style={{ color: 'var(--accent)' }} />
+          <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-secondary)' }}>Connecting to Convex cloud...</span>
+        </div>
+      ) : (
+        <>
       {/* Top navbar */}
       <nav className="top-nav">
         <div className="top-nav-logo">
@@ -1654,7 +1679,7 @@ Rules:
                       refinementLoading={refinementLoading}
                       handleRefineReportText={handleRefineReportText}
                       csvInputRef={csvInputRef}
-                      handleCSVUpload={handleCSVUpload}
+                      handleCSVUpload={handleAttendanceUpload}
                       csvErrors={csvErrors}
                       brochureInputRef={brochureInputRef}
                       handleBrochureUpload={handleBrochureUpload}
@@ -1917,6 +1942,8 @@ Rules:
             </button>
           </div>
         </>
+      )}
+      </>
       )}
 
       {/* Toast notifications container */}
