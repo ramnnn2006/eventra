@@ -218,74 +218,79 @@ export const setUserSettings = mutation({
 // Initialize default data
 export const initializeDefaults = mutation({
   handler: async (ctx) => {
-    // Check if coordinators exist
+    // Seed missing records individually. Older versions only seeded when a
+    // table was empty, which left partially configured databases missing the
+    // built-in coordinators, venues, or event types.
     const coordinators = await ctx.db.query("coordinators").collect();
-    if (coordinators.length === 0) {
-      await ctx.db.insert("coordinators", {
+    const coordinatorDefaults = [
+      {
         empId: "50930",
         name: "Dr Anusha K",
         department: "SCOPE",
         signature: "",
-      });
-      await ctx.db.insert("coordinators", {
+      },
+      {
         empId: "51327",
         name: "Dr Braveen M",
         department: "SCOPE",
         signature: "",
-      });
+      },
+    ];
+    for (const coordinator of coordinatorDefaults) {
+      if (!coordinators.some((existing) => existing.empId === coordinator.empId)) {
+        await ctx.db.insert("coordinators", coordinator);
+      }
     }
 
-    // Check if venues exist
     const venues = await ctx.db.query("venues").collect();
-    if (venues.length === 0) {
-      const defaultVenues = [
-        "MG Auditorium",
-        "Kasturba Auditorium",
-        "Kamaraj Auditorium",
-        "Netaji Auditorium",
-        "VOC Auditorium",
-        "Classroom",
-        "Online",
-        "Other",
-      ];
-      for (const venue of defaultVenues) {
+    const defaultVenues = [
+      "MG Auditorium",
+      "Kasturba Auditorium",
+      "Kamaraj Auditorium",
+      "Netaji Auditorium",
+      "VOC Auditorium",
+      "Classroom",
+      "Online",
+      "Other",
+    ];
+    for (const venue of defaultVenues) {
+      if (!venues.some((existing) => existing.name === venue)) {
         await ctx.db.insert("venues", { name: venue });
       }
     }
 
-    // Check if event types exist
     const eventTypes = await ctx.db.query("eventTypes").collect();
-    if (eventTypes.length === 0) {
-      const defaultTypes = [
-        "Workshop",
-        "Online Workshop",
-        "Hackathon",
-        "Competition",
-        "Guest Lecture",
-        "Seminar",
-        "Symposium",
-        "Conference",
-        "Value Added Session",
-        "Training Program",
-        "Other",
-      ];
-      for (const type of defaultTypes) {
+    const defaultTypes = [
+      "Workshop",
+      "Online Workshop",
+      "Hackathon",
+      "Competition",
+      "Guest Lecture",
+      "Seminar",
+      "Symposium",
+      "Conference",
+      "Value Added Session",
+      "Training Program",
+      "Other",
+    ];
+    for (const type of defaultTypes) {
+      if (!eventTypes.some((existing) => existing.name === type)) {
         await ctx.db.insert("eventTypes", { name: type });
       }
     }
 
-    // Check if logos exist
+    // Logos are treated the same way so a partial setup is repaired too.
     const logos = await ctx.db.query("logos").collect();
-    if (logos.length === 0) {
-      const defaultLogos = [
-        { id: "vitc", name: "VIT Chennai", isOptional: false, src: "/vitclogo.png", dataUrl: "" },
-        { id: "mic", name: "Microsoft Innovations Club", isOptional: false, src: "/miclogo.png", dataUrl: "" },
-        { id: "swc", name: "Student Welfare", isOptional: false, src: "/swc.png", dataUrl: "" },
-        { id: "iic", name: "IIC", isOptional: true, src: "/iic.png", dataUrl: "" },
-        { id: "mlsa", name: "MLSA", isOptional: true, src: "/mlsa.png", dataUrl: "" },
-        { id: "vnest", name: "VNEST", isOptional: true, src: "/vnest.png", dataUrl: "" },
-      ];
-      for (const logo of defaultLogos) {
+    const defaultLogos = [
+      { id: "vitc", name: "VIT Chennai", isOptional: false, src: "/vitclogo.png", dataUrl: "" },
+      { id: "mic", name: "Microsoft Innovations Club", isOptional: false, src: "/miclogo.png", dataUrl: "" },
+      { id: "swc", name: "Student Welfare", isOptional: false, src: "/swc.png", dataUrl: "" },
+      { id: "iic", name: "IIC", isOptional: true, src: "/iic.png", dataUrl: "" },
+      { id: "mlsa", name: "MLSA", isOptional: true, src: "/mlsa.png", dataUrl: "" },
+      { id: "vnest", name: "VNEST", isOptional: true, src: "/vnest.png", dataUrl: "" },
+    ];
+    for (const logo of defaultLogos) {
+      if (!logos.some((existing) => existing.id === logo.id)) {
         await ctx.db.insert("logos", logo);
       }
     }

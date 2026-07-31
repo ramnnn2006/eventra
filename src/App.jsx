@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { useQuery, useMutation } from "convex/react";
+import { Document, Packer, Paragraph, Table, TableRow, TableCell, TextRun, WidthType, AlignmentType, BorderStyle, ImageRun, HeadingLevel, PageBreak, Header, Footer } from 'docx';
 
 // Lazy-load modular components for code splitting
 const LoginCard = React.lazy(() => import('./components/LoginCard'));
@@ -24,6 +25,23 @@ const ADMIN_USERNAME = import.meta.env.VITE_ADMIN_USERNAME || 'admin';
 const ADMIN_PASSWORD = import.meta.env.VITE_ADMIN_PASSWORD || 'admin6767';
 const USER_USERNAME = import.meta.env.VITE_USER_USERNAME || 'user';
 const USER_PASSWORD = import.meta.env.VITE_USER_PASSWORD || 'user123';
+
+// These are also seeded in Convex. Keeping the client-side copy means a new
+// report is usable while Convex is still loading and protects against older
+// databases that were only partially seeded.
+const DEFAULT_COORDINATORS = [
+  { empId: '50930', name: 'Dr Anusha K', department: 'SCOPE', signature: '' },
+  { empId: '51327', name: 'Dr Braveen M', department: 'SCOPE', signature: '' },
+];
+const DEFAULT_VENUES = [
+  'MG Auditorium', 'Kasturba Auditorium', 'Kamaraj Auditorium',
+  'Netaji Auditorium', 'VOC Auditorium', 'Classroom', 'Online', 'Other',
+];
+const DEFAULT_EVENT_TYPES = [
+  'Workshop', 'Online Workshop', 'Hackathon', 'Competition', 'Guest Lecture',
+  'Seminar', 'Symposium', 'Conference', 'Value Added Session',
+  'Training Program', 'Other',
+];
 
 const escapeHtml = (unsafe) => {
   if (!unsafe) return '';
@@ -47,7 +65,8 @@ function arrayBufferToBase64(buffer) {
 }
 
 function base64ToArrayBuffer(base64) {
-  const binary_string = window.atob(base64);
+  const normalized = String(base64 || '').replace(/^data:.*?;base64,/, '').replace(/\s/g, '');
+  const binary_string = window.atob(normalized);
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
   for (let i = 0; i < len; i++) {
@@ -648,11 +667,21 @@ export default function App() {
   }, [showToast]);
 
   // Dynamic lists from Convex (memoized)
-  const coordinatorsList = useMemo(() => convexDb?.coordinators || [], [convexDb]);
-  const venuesRaw = useMemo(() => convexDb?.venues || [], [convexDb]);
-  const venuesList = useMemo(() => (convexDb?.venues || []).map(v => typeof v === 'object' ? v.name : v), [convexDb]);
-  const eventTypesRaw = useMemo(() => convexDb?.eventTypes || [], [convexDb]);
-  const eventTypesList = useMemo(() => (convexDb?.eventTypes || []).map(t => typeof t === 'object' ? t.name : t), [convexDb]);
+  const coordinatorsList = useMemo(() => {
+    const current = convexDb?.coordinators || [];
+    const byId = new Map(current.map(c => [c.empId, c]));
+    return [...DEFAULT_COORDINATORS.map(c => byId.get(c.empId) || c), ...current.filter(c => !DEFAULT_COORDINATORS.some(d => d.empId === c.empId))];
+  }, [convexDb]);
+  const venuesRaw = useMemo(() => convexDb?.venues || DEFAULT_VENUES.map(name => ({ name })), [convexDb]);
+  const venuesList = useMemo(() => [...new Set([
+    ...DEFAULT_VENUES,
+    ...(convexDb?.venues || []).map(v => typeof v === 'object' ? v.name : v),
+  ].filter(Boolean))], [convexDb]);
+  const eventTypesRaw = useMemo(() => convexDb?.eventTypes || DEFAULT_EVENT_TYPES.map(name => ({ name })), [convexDb]);
+  const eventTypesList = useMemo(() => [...new Set([
+    ...DEFAULT_EVENT_TYPES,
+    ...(convexDb?.eventTypes || []).map(t => typeof t === 'object' ? t.name : t),
+  ].filter(Boolean))], [convexDb]);
   const uploadedReportsList = useMemo(() => convexDb?.uploadedReports || [], [convexDb]);
   const logosList = useMemo(() => convexDb?.logos || [], [convexDb]);
 
@@ -660,7 +689,7 @@ export default function App() {
   const generateDocxFile = useCallback(async () => {
     try {
       let buffer;
-      const savedTemplate = convexDb?.customTemplate || customTemplate;
+      const savedTemplate = convexDb?.customTemplate || null;
       if (savedTemplate) {
         buffer = base64ToArrayBuffer(savedTemplate);
       } else {
@@ -669,6 +698,8 @@ export default function App() {
         buffer = await response.arrayBuffer();
       }
       
+      // PizZip validates the complete OOXML container. This prevents a bad
+      // upload or truncated database value from producing a corrupt download.
       const zip = new PizZip(buffer);
       const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
@@ -729,6 +760,7 @@ export default function App() {
       const out = doc.getZip().generate({
         type: 'blob',
         mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        compression: 'DEFLATE',
       });
 
       // Save report output to database (utilizing Convex to the max!)
@@ -754,262 +786,335 @@ export default function App() {
       URL.revokeObjectURL(url);
       showToast('Report generated & saved to database.');
     } catch (e) {
-      showToast('DOCX generation error: ' + e.message);
+      console.error('DOCX generation error:', e);
+      showToast('DOCX generation error: ' + (e.properties?.explanation || e.message || 'Invalid DOCX template'));
     }
   }, [formData, coordinatorsList, convexDb, showToast]);
 
   // Generate beautiful HTML-based Word Doc (preserves images perfectly)
-  const generateRichWordDoc = useCallback(() => {
-    const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
-    const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
+  const generateRichWordDoc = useCallback(async () => {
+    try {
+      const f1 = coordinatorsList.find(c => c.empId === formData.coord1);
+      const f2 = coordinatorsList.find(c => c.empId === formData.coord2);
 
-    const activeOptionalLogos = logosList.filter(l => l.isOptional && formData.selectedLogos.includes(l.id));
-    const leftLogo = logosList.find(l => l.id === 'vitc');
-    const centerLogo = logosList.find(l => l.id === 'mic');
-    const rightLogo = logosList.find(l => l.id === 'swc');
+      const venueName = formData.venue === 'Classroom' || formData.venue === 'Other' ? formData.customVenue : formData.venue;
 
-    const half = Math.ceil(activeOptionalLogos.length / 2);
-    const leftGroup = activeOptionalLogos.slice(0, half);
-    const rightGroup = activeOptionalLogos.slice(half);
+      // Helper to create a bordered table cell
+      const cell = (text, opts = {}) => new TableCell({
+        children: [new Paragraph({
+          children: [new TextRun({ text: text || '', font: 'Times New Roman', size: 22, bold: opts.bold || false })],
+          alignment: opts.alignment || AlignmentType.LEFT,
+        })],
+        width: opts.width ? { size: opts.width, type: WidthType.PERCENTAGE } : undefined,
+        verticalMerge: opts.verticalMerge,
+        columnSpan: opts.columnSpan,
+        shading: opts.shading,
+      });
 
-    const orderedLogos = [
-      leftLogo,
-      ...leftGroup,
-      centerLogo,
-      ...rightGroup,
-      rightLogo
-    ].filter(Boolean);
+      // Build the details table rows
+      const detailRows = [
+        new TableRow({ children: [
+          cell('Event type', { bold: true, width: 30 }),
+          cell(formData.eventType || '', { columnSpan: 3 }),
+        ] }),
+        new TableRow({ children: [
+          cell('Title of the event', { bold: true }),
+          cell(formData.eventTitle || '', { columnSpan: 3 }),
+        ] }),
+        new TableRow({ children: [
+          cell('Date (From – To)', { bold: true }),
+          cell(`${formData.startDate || ''} to ${formData.endDate || ''}`, { columnSpan: 3 }),
+        ] }),
+        new TableRow({ children: [
+          cell('Time', { bold: true }),
+          cell(`${formData.startTime || ''} (Duration: ${formData.duration || ''})`, { columnSpan: 3 }),
+        ] }),
+        new TableRow({ children: [
+          cell('Venue', { bold: true }),
+          cell(venueName || '', { columnSpan: 3 }),
+        ] }),
+        new TableRow({ children: [
+          cell('No. of Participants', { bold: true }),
+          cell(String(formData.attendanceData ? formData.attendanceData.length : 0), { columnSpan: 3 }),
+        ] }),
+        // Coordinator header
+        new TableRow({ children: [
+          cell('Coordinator(s)', { bold: true, shading: { fill: 'F2F2F2' } }),
+          cell('Emp. ID.', { bold: true, shading: { fill: 'F2F2F2' } }),
+          cell('Faculty Name', { bold: true, shading: { fill: 'F2F2F2' } }),
+          cell('Department', { bold: true, shading: { fill: 'F2F2F2' } }),
+        ] }),
+        new TableRow({ children: [
+          cell(''),
+          cell(f1 ? f1.empId : ''),
+          cell(f1 ? f1.name : ''),
+          cell(f1 ? f1.department : ''),
+        ] }),
+        new TableRow({ children: [
+          cell(''),
+          cell(f2 ? f2.empId : ''),
+          cell(f2 ? f2.name : ''),
+          cell(f2 ? f2.department : ''),
+        ] }),
+      ];
 
-    const logoCells = orderedLogos.map(logo => `
-      <td style="border: none; text-align: center; vertical-align: middle;">
-        <img src="${logo.dataUrl}" style="height: 50px; width: auto;" alt="${logo.name}" />
-      </td>
-    `).join('');
-
-    const logosTableHtml = `
-      <table style="width: 100%; border: none; margin-bottom: 20px;">
-        <tr>
-          ${logoCells}
-        </tr>
-      </table>
-    `;
-
-    const docHtml = `
-      <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-      <head>
-        <title>MIC Event Report</title>
-        <!--[if gte mso 9]>
-        <xml>
-          <w:WordDocument>
-            <w:View>Print</w:View>
-            <w:Zoom>100</w:Zoom>
-          </w:WordDocument>
-        </xml>
-        <![endif]-->
-        <style>
-          body { font-family: 'Times New Roman', serif; font-size: 11pt; line-height: 1.5; color: #000; margin: 1in; }
-          .title { text-align: center; font-size: 16pt; font-weight: bold; margin-bottom: 5px; text-transform: uppercase; }
-          .subtitle { text-align: center; font-size: 11pt; font-weight: bold; margin-bottom: 25px; text-transform: uppercase; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 10pt; }
-          table, th, td { border: 1.5pt solid #000; }
-          th, td { padding: 6px 10px; text-align: left; vertical-align: top; }
-          .header-row { background-color: #f2f2f2; font-weight: bold; }
-          .section-title { font-weight: bold; font-size: 12pt; margin-top: 25px; margin-bottom: 10px; text-transform: uppercase; border-bottom: 1px solid #000; padding-bottom: 3px; }
-          .centered { text-align: center; }
-          .images-grid { margin: 15px 0; }
-          .image-container { display: inline-block; width: 48%; margin-right: 2%; text-align: center; margin-bottom: 15px; }
-          .image-container img { width: 100%; height: auto; max-height: 250px; border: 1px solid #ddd; }
-          .brochure-container { text-align: center; margin: 20px 0; }
-          .brochure-container img { max-width: 80%; height: auto; max-height: 400px; }
-          .signatures { margin-top: 50px; width: 100%; border: none; }
-          .signatures td { border: none; padding: 0; width: 33%; text-align: center; font-weight: bold; }
-          .sig-img { max-height: 45px; display: block; margin: 0 auto 5px auto; }
-        </style>
-      </head>
-      <body>
-        ${logosTableHtml}
-        <div class="title">Microsoft Innovations Club</div>
-        <div class="subtitle">VALUE ADDED / GUEST LECTURE / SEMINAR / WORKSHOP / SYMPOSIUM / CONFERENCE / TRAINING PROGRAM DETAILS</div>
-        
-        <table>
-          <tr>
-            <td width="30%"><b>Event type</b></td>
-            <td colspan="3">${escapeHtml(formData.eventType || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Title of the event</b></td>
-            <td colspan="3">${escapeHtml(formData.eventTitle || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Date (From – To)</b></td>
-            <td colspan="3">${escapeHtml(formData.startDate || '')} to ${escapeHtml(formData.endDate || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Time</b></td>
-            <td colspan="3">${escapeHtml(formData.startTime || '')} (Duration: ${escapeHtml(formData.duration || '')})</td>
-          </tr>
-          <tr>
-            <td><b>Venue</b></td>
-            <td colspan="3">${escapeHtml(formData.venue === 'Classroom' || formData.venue === 'Other' ? formData.customVenue : formData.venue)}</td>
-          </tr>
-          <tr>
-            <td><b>No. of Participants</b></td>
-            <td colspan="3">${formData.attendanceData ? formData.attendanceData.length : 0}</td>
-          </tr>
-          <tr class="header-row">
-            <td rowspan="3" style="vertical-align: middle;"><b>Coordinator(s)</b></td>
-            <td><b>Emp. ID.</b></td>
-            <td><b>Faculty Name</b></td>
-            <td><b>Department</b></td>
-          </tr>
-          <tr>
-            <td>${f1 ? escapeHtml(f1.empId) : ''}</td>
-            <td>${f1 ? escapeHtml(f1.name) : ''}</td>
-            <td>${f1 ? escapeHtml(f1.department) : ''}</td>
-          </tr>
-          <tr>
-            <td>${f2 ? escapeHtml(f2.empId) : ''}</td>
-            <td>${f2 ? escapeHtml(f2.name) : ''}</td>
-            <td>${f2 ? escapeHtml(f2.department) : ''}</td>
-          </tr>
-          ${formData.resourcePersonEnabled ? `
-          <tr>
-            <td><b>Resource Person Name</b></td>
-            <td colspan="3">${escapeHtml(formData.resourcePerson.name || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Designation</b></td>
-            <td colspan="3">${escapeHtml(formData.resourcePerson.designation || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Organization Details</b></td>
-            <td colspan="3">${escapeHtml(formData.resourcePerson.organization || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Place</b></td>
-            <td colspan="3">${escapeHtml(formData.resourcePerson.place || '')}</td>
-          </tr>
-          <tr>
-            <td><b>E-mail</b></td>
-            <td colspan="3">${escapeHtml(formData.resourcePerson.email || '')}</td>
-          </tr>
-          <tr>
-            <td><b>Mobile no.</b></td>
-            <td colspan="3">${escapeHtml(formData.resourcePerson.mobile || '')}</td>
-          </tr>
-          ` : ''}
-        </table>
-
-        <div style="page-break-before: always;"></div>
-
-        ${formData.brochureImage ? `
-          <div class="section-title">Brochure / Circular of the Event / Programme Schedule</div>
-          <div class="brochure-container">
-            <img src="${formData.brochureImage}" alt="Event Brochure" />
-          </div>
-          <div style="page-break-before: always;"></div>
-        ` : ''}
-
-        <div class="title" style="margin-top: 20px;">A REPORT ON ${escapeHtml(formData.eventTitle || '').toUpperCase()}</div>
-        <div style="margin-top: 15px; text-align: justify;">
-          ${(formData.description || '').split('\n').map(p => `<p>${escapeHtml(p)}</p>`).join('')}
-        </div>
-
-        ${formData.images && formData.images.length > 0 ? `
-          <div class="section-title">Geotagged photos of the event with caption and date</div>
-          <div class="images-grid">
-            ${formData.images.map((img, i) => `
-              <div class="image-container">
-                <img src="${img}" alt="Event Photo ${i+1}" />
-                <div style="font-size: 9pt; margin-top: 5px;">Photo ${i+1}: Event execution. Date: ${escapeHtml(formData.startDate || '')}</div>
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
-
-        <div style="page-break-before: always;"></div>
-
-        <div class="section-title">Attendance</div>
-        <div class="subtitle" style="text-align: left; margin-bottom: 10px;">
-          <b>Event Name:</b> ${escapeHtml(formData.eventTitle || '')}<br/>
-          <b>Date:</b> ${escapeHtml(formData.startDate || '')}
-        </div>
-        
-        <table>
-          <tr class="header-row">
-            <th width="8%">Sl. No.</th>
-            <th width="30%">Reg. No. / Emp. ID.</th>
-            <th>Name</th>
-            <th width="15%">Type</th>
-          </tr>
-          ${formData.attendanceData.map((p, idx) => `
-            <tr>
-              <td>${idx + 1}</td>
-              <td>${escapeHtml(p.regNo || '')}</td>
-              <td>${escapeHtml(p.name || '')}</td>
-               <td>${p.type === 'Student' ? 'Student' : p.type === 'Faculty' ? 'Faculty' : p.type === 'External' ? 'External' : ''}</td>
-            </tr>
-          `).join('')}
-        </table>
-
-        ${formData.financeEnabled ? `
-          <div style="page-break-before: always;"></div>
-          <div class="section-title">Expenditure / Revenue Details of the Event</div>
-          <table>
-            <tr class="header-row">
-              <th>Expenditure (Rs.)</th>
-              <th>Revenue (Rs.)</th>
-              <th>Remarks</th>
-            </tr>
-            <tr>
-              <td>${escapeHtml(formData.finance.expenditure || '0')}</td>
-              <td>${escapeHtml(formData.finance.revenue || '0')}</td>
-              <td>${escapeHtml(formData.finance.remarks || 'None')}</td>
-            </tr>
-          </table>
-        ` : ''}
-
-        <table class="signatures" style="margin-top: 60px;">
-          <tr>
-            <td>
-              ${f1 && f1.signature ? `<img class="sig-img" src="${f1.signature}" alt="Signature" />` : ''}
-              Signature of the Coordinator
-            </td>
-            <td>
-              Signature of Asst. Director Student Welfare
-            </td>
-            <td>
-              Signature of Dean / Director
-            </td>
-          </tr>
-        </table>
-      </body>
-      </html>
-    `;
-
-    const blob = new Blob(['\ufeff' + docHtml], { type: 'application/msword' });
-    const title = formData.eventTitle || 'Event Report';
-    const fileName = `${(formData.eventTitle || 'event').toLowerCase().replace(/\s+/g, '_')}_report.doc`;
-
-    // Save report output to database (utilizing Convex to the max!)
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      const base64 = reader.result.split(',')[1];
-      if (convexDb) {
-        await convexDb.addReport(title, formData.eventType, formData.startDate, fileName, base64);
+      // Add resource person rows if enabled
+      if (formData.resourcePersonEnabled) {
+        const rpFields = [
+          ['Resource Person Name', formData.resourcePerson.name],
+          ['Designation', formData.resourcePerson.designation],
+          ['Organization Details', formData.resourcePerson.organization],
+          ['Place', formData.resourcePerson.place],
+          ['E-mail', formData.resourcePerson.email],
+          ['Mobile no.', formData.resourcePerson.mobile],
+        ];
+        rpFields.forEach(([label, value]) => {
+          detailRows.push(new TableRow({ children: [
+            cell(label, { bold: true }),
+            cell(value || '', { columnSpan: 3 }),
+          ] }));
+        });
       }
-    };
-    reader.readAsDataURL(blob);
 
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = fileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-    showToast('Full report generated & saved to database.');
+      const detailsTable = new Table({
+        rows: detailRows,
+        width: { size: 100, type: WidthType.PERCENTAGE },
+      });
+
+      // Build the main document sections
+      const sections = [];
+      const mainChildren = [];
+
+      // Title
+      mainChildren.push(
+        new Paragraph({
+          children: [new TextRun({ text: 'Microsoft Innovations Club', font: 'Times New Roman', size: 32, bold: true })],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 100 },
+        }),
+        new Paragraph({
+          children: [new TextRun({ text: 'VALUE ADDED / GUEST LECTURE / SEMINAR / WORKSHOP / SYMPOSIUM / CONFERENCE / TRAINING PROGRAM DETAILS', font: 'Times New Roman', size: 22, bold: true })],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 400 },
+        }),
+        detailsTable,
+      );
+
+      // Brochure section (image as base64)
+      if (formData.brochureImage) {
+        mainChildren.push(
+          new Paragraph({ children: [new PageBreak()] }),
+          new Paragraph({
+            children: [new TextRun({ text: 'BROCHURE / CIRCULAR OF THE EVENT / PROGRAMME SCHEDULE', font: 'Times New Roman', size: 24, bold: true })],
+            alignment: AlignmentType.CENTER,
+            spacing: { after: 300 },
+          }),
+        );
+        try {
+          const brochureBase64 = formData.brochureImage.split(',')[1];
+          mainChildren.push(
+            new Paragraph({
+              children: [new ImageRun({ data: Uint8Array.from(atob(brochureBase64), c => c.charCodeAt(0)), transformation: { width: 450, height: 600 }, type: 'png' })],
+              alignment: AlignmentType.CENTER,
+            }),
+          );
+        } catch (_e) {
+          mainChildren.push(new Paragraph({ children: [new TextRun({ text: '[Event Brochure / Poster Attached]', font: 'Times New Roman', size: 22 })] }));
+        }
+      }
+
+      // Report write-up
+      mainChildren.push(
+        new Paragraph({ children: [new PageBreak()] }),
+        new Paragraph({
+          children: [new TextRun({ text: `A REPORT ON ${(formData.eventTitle || '').toUpperCase()}`, font: 'Times New Roman', size: 28, bold: true })],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 300 },
+        }),
+      );
+
+      // Description paragraphs
+      const descParagraphs = (formData.description || '').split('\n').filter(p => p.trim());
+      descParagraphs.forEach(para => {
+        mainChildren.push(
+          new Paragraph({
+            children: [new TextRun({ text: para, font: 'Times New Roman', size: 22 })],
+            alignment: AlignmentType.JUSTIFIED,
+            spacing: { after: 200 },
+            indent: { firstLine: 720 },
+          }),
+        );
+      });
+
+      // Event photos
+      if (formData.images && formData.images.length > 0) {
+        mainChildren.push(
+          new Paragraph({
+            children: [new TextRun({ text: 'GEOTAGGED PHOTOS OF THE EVENT WITH CAPTION AND DATE', font: 'Times New Roman', size: 24, bold: true })],
+            spacing: { before: 400, after: 300 },
+          }),
+        );
+        for (let i = 0; i < formData.images.length; i++) {
+          try {
+            const imgBase64 = formData.images[i].split(',')[1];
+            mainChildren.push(
+              new Paragraph({
+                children: [new ImageRun({ data: Uint8Array.from(atob(imgBase64), c => c.charCodeAt(0)), transformation: { width: 400, height: 300 }, type: 'png' })],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 100 },
+              }),
+              new Paragraph({
+                children: [new TextRun({ text: `Photo ${i+1}: Event execution. Date: ${formData.startDate || ''}`, font: 'Times New Roman', size: 18, italics: true })],
+                alignment: AlignmentType.CENTER,
+                spacing: { after: 300 },
+              }),
+            );
+          } catch (_e) {
+            mainChildren.push(new Paragraph({ children: [new TextRun({ text: `[Event Photo ${i+1} Attached]`, font: 'Times New Roman', size: 22 })] }));
+          }
+        }
+      }
+
+      // Attendance table
+      mainChildren.push(
+        new Paragraph({ children: [new PageBreak()] }),
+        new Paragraph({
+          children: [new TextRun({ text: 'ATTENDANCE', font: 'Times New Roman', size: 28, bold: true })],
+          alignment: AlignmentType.CENTER,
+          spacing: { after: 200 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({ text: 'Event Name: ', font: 'Times New Roman', size: 22, bold: true }),
+            new TextRun({ text: formData.eventTitle || '', font: 'Times New Roman', size: 22 }),
+          ],
+          spacing: { after: 100 },
+        }),
+        new Paragraph({
+          children: [
+            new TextRun({ text: 'Date: ', font: 'Times New Roman', size: 22, bold: true }),
+            new TextRun({ text: formData.startDate || '', font: 'Times New Roman', size: 22 }),
+          ],
+          spacing: { after: 200 },
+        }),
+      );
+
+      const attendanceRows = [
+        new TableRow({ children: [
+          cell('Sl. No.', { bold: true, width: 8, shading: { fill: 'F2F2F2' } }),
+          cell('Reg. No. / Emp. ID.', { bold: true, width: 30, shading: { fill: 'F2F2F2' } }),
+          cell('Name', { bold: true, shading: { fill: 'F2F2F2' } }),
+          cell('Type', { bold: true, width: 15, shading: { fill: 'F2F2F2' } }),
+        ] }),
+        ...(formData.attendanceData || []).map((p, idx) => new TableRow({ children: [
+          cell(String(idx + 1)),
+          cell(p.regNo || ''),
+          cell(p.name || ''),
+          cell(p.type === 'Student' ? 'Student' : p.type === 'Faculty' ? 'Faculty' : p.type === 'External' ? 'External' : ''),
+        ] })),
+      ];
+
+      mainChildren.push(new Table({
+        rows: attendanceRows,
+        width: { size: 100, type: WidthType.PERCENTAGE },
+      }));
+
+      // Finance section
+      if (formData.financeEnabled) {
+        mainChildren.push(
+          new Paragraph({ children: [new PageBreak()] }),
+          new Paragraph({
+            children: [new TextRun({ text: 'EXPENDITURE / REVENUE DETAILS OF THE EVENT', font: 'Times New Roman', size: 24, bold: true })],
+            spacing: { after: 300 },
+          }),
+          new Table({
+            rows: [
+              new TableRow({ children: [
+                cell('Expenditure (Rs.)', { bold: true, shading: { fill: 'F2F2F2' } }),
+                cell('Revenue (Rs.)', { bold: true, shading: { fill: 'F2F2F2' } }),
+                cell('Remarks', { bold: true, shading: { fill: 'F2F2F2' } }),
+              ] }),
+              new TableRow({ children: [
+                cell(formData.finance.expenditure || '0'),
+                cell(formData.finance.revenue || '0'),
+                cell(formData.finance.remarks || 'None'),
+              ] }),
+            ],
+            width: { size: 100, type: WidthType.PERCENTAGE },
+          }),
+        );
+      }
+
+      // Signatures section
+      mainChildren.push(
+        new Paragraph({ text: '', spacing: { before: 1200 } }),
+      );
+
+      const sigChildren1 = [];
+      if (f1 && f1.signature) {
+        try {
+          const sigBase64 = f1.signature.split(',')[1];
+          sigChildren1.push(new ImageRun({ data: Uint8Array.from(atob(sigBase64), c => c.charCodeAt(0)), transformation: { width: 100, height: 40 }, type: 'png' }));
+        } catch (_e) { /* ignore */ }
+      }
+      sigChildren1.push(new TextRun({ text: '\nSignature of the Coordinator', font: 'Times New Roman', size: 20, bold: true, break: f1?.signature ? 1 : 0 }));
+
+      const sigRow = new TableRow({ children: [
+        new TableCell({
+          children: [new Paragraph({ children: sigChildren1, alignment: AlignmentType.CENTER })],
+          borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: 'Signature of Asst. Director Student Welfare', font: 'Times New Roman', size: 20, bold: true })], alignment: AlignmentType.CENTER })],
+          borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
+        }),
+        new TableCell({
+          children: [new Paragraph({ children: [new TextRun({ text: 'Signature of Dean / Director', font: 'Times New Roman', size: 20, bold: true })], alignment: AlignmentType.CENTER })],
+          borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
+        }),
+      ] });
+
+      mainChildren.push(new Table({
+        rows: [sigRow],
+        width: { size: 100, type: WidthType.PERCENTAGE },
+      }));
+
+      sections.push({ children: mainChildren });
+
+      const doc = new Document({
+        sections,
+        creator: 'Eventra - Microsoft Innovations Club',
+        title: `MIC Event Report - ${formData.eventTitle || 'Event'}`,
+        description: 'Event report generated by Eventra',
+      });
+
+      const docBlob = await Packer.toBlob(doc);
+      const title = formData.eventTitle || 'Event Report';
+      const fileName = `${(formData.eventTitle || 'event').toLowerCase().replace(/\s+/g, '_')}_report.docx`;
+
+      // Save report output to database
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const base64 = reader.result.split(',')[1];
+        if (convexDb) {
+          await convexDb.addReport(title, formData.eventType, formData.startDate, fileName, base64);
+        }
+      };
+      reader.readAsDataURL(docBlob);
+
+      const url = URL.createObjectURL(docBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      showToast('Full report generated & saved to database.');
+    } catch (e) {
+      console.error('Rich DOCX generation error:', e);
+      showToast('DOCX generation error: ' + e.message);
+    }
   }, [formData, coordinatorsList, logosList, convexDb, showToast]);
 
   // Direct completed report upload
@@ -1123,12 +1228,18 @@ export default function App() {
     if (file) {
       const reader = new FileReader();
       reader.onload = async (event) => {
-        const base64 = arrayBufferToBase64(event.target.result);
-        setCustomTemplate(base64);
-        if (convexDb) {
-          await convexDb.setCustomTemplate(base64);
+        try {
+          // Validate before persisting. A .docx is a ZIP/OOXML package, not
+          // merely a file with a .docx extension.
+          const zip = new PizZip(event.target.result);
+          if (!zip.file('word/document.xml')) throw new Error('The DOCX is missing word/document.xml.');
+          const base64 = arrayBufferToBase64(event.target.result);
+          if (convexDb) await convexDb.setCustomTemplate(base64);
+          showToast('Template file replaced and saved.');
+        } catch (error) {
+          console.error('Template validation error:', error);
+          showToast('Template upload rejected: ' + (error.message || 'invalid DOCX file'));
         }
-        showToast('Template file replaced and saved.');
       };
       reader.readAsArrayBuffer(file);
       if (templateInputRef.current) templateInputRef.current.value = '';
