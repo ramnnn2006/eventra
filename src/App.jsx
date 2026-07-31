@@ -75,6 +75,23 @@ function base64ToArrayBuffer(base64) {
   return bytes.buffer;
 }
 
+// Some Word/Android viewers collapse a table when the OOXML contains a
+// w:tblGridChange with a different number of columns than the active grid.
+// The supplied template has exactly that shape in its attendance table. Use
+// the latest grid recorded by Word and remove the stale change wrapper before
+// docxtemplater renders any values.
+function normalizeDocxTableGrids(zip) {
+  const documentFile = zip.file('word/document.xml');
+  if (!documentFile) throw new Error('The DOCX is missing word/document.xml.');
+
+  const xml = documentFile.asText();
+  const normalizedXml = xml.replace(
+    /<w:tblGrid>([\s\S]*?)<w:tblGridChange\b[^>]*><w:tblGrid>([\s\S]*?)<\/w:tblGrid><\/w:tblGridChange><\/w:tblGrid>/g,
+    '<w:tblGrid>$2</w:tblGrid>'
+  );
+  zip.file('word/document.xml', normalizedXml);
+}
+
 async function fetchImageAsBase64(url) {
   try {
     const response = await fetch(url);
@@ -701,6 +718,7 @@ export default function App() {
       // PizZip validates the complete OOXML container. This prevents a bad
       // upload or truncated database value from producing a corrupt download.
       const zip = new PizZip(buffer);
+      normalizeDocxTableGrids(zip);
       const doc = new Docxtemplater(zip, {
         paragraphLoop: true,
         linebreaks: true,
