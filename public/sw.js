@@ -1,11 +1,17 @@
-const CACHE_NAME = 'mic-reporter-v2';
+const CACHE_NAME = 'eventra-v3';
 const ASSETS = [
   '/',
   '/index.html',
   '/manifest.json',
   '/template.docx',
   '/facsign.png',
-  '/favicon.svg'
+  '/favicon.svg',
+  '/miclogo.png',
+  '/vitclogo.png',
+  '/swc.png',
+  '/iic.png',
+  '/mlsa.png',
+  '/vnest.png'
 ];
 
 self.addEventListener('install', (e) => {
@@ -33,6 +39,15 @@ self.addEventListener('activate', (e) => {
 // Network-First strategy
 self.addEventListener('fetch', (e) => {
   if (e.request.method !== 'GET') return;
+
+  // Navigation requests need the app shell when offline; static assets use
+  // the cache when available and refresh in the background when online.
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match('/index.html'))
+    );
+    return;
+  }
 
   e.respondWith(
     fetch(e.request)

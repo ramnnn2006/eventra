@@ -33,6 +33,7 @@
   
   /* Layout Dimensions */
   --container-width: 840px;
+  --page-gutter: clamp(16px, 4vw, 64px);
 }
 
 /* Dark Mode Palette */
@@ -70,6 +71,12 @@ body.dark-theme {
   padding: 0;
 }
 
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--bg);
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--bg);
@@ -77,12 +84,30 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-width: 320px;
+  min-height: 100%;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 
 input, select, textarea, button {
   font-family: inherit;
   font-size: inherit;
   color: inherit;
+}
+
+button, input, select, textarea {
+  max-width: 100%;
+}
+
+button, .btn, .accent-dot, .admin-nav-item, .choice-card {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (pointer: coarse) {
+  button, .btn, select, input[type="file"] {
+    min-height: 44px;
+  }
 }
 
 /* App Wrapper */
@@ -98,7 +123,8 @@ input, select, textarea, button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 24px;
+  min-height: calc(100dvh - 66px);
+  padding: clamp(24px, 5vw, 56px) var(--page-gutter);
   width: 100%;
 }
 
@@ -107,7 +133,8 @@ input, select, textarea, button {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px 32px;
+  min-height: 66px;
+  padding: 12px var(--page-gutter);
   background-color: var(--card-bg);
   border-bottom: 1px solid var(--border-light);
   font-size: 14px;
@@ -125,6 +152,8 @@ input, select, textarea, button {
   display: flex;
   align-items: center;
   gap: 16px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 /* Accent Picker */
@@ -218,7 +247,7 @@ input, select, textarea, button {
 .landing-split-container {
   display: grid;
   grid-template-columns: 1.2fr 1fr;
-  gap: 80px;
+  gap: clamp(32px, 7vw, 80px);
   width: 100%;
   max-width: 1100px;
   margin: 0 auto;
@@ -256,7 +285,7 @@ input, select, textarea, button {
 }
 
 .landing-hero-title {
-  font-size: 64px;
+  font-size: clamp(42px, 5.5vw, 64px);
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -2px;
@@ -522,6 +551,7 @@ input, select, textarea, button {
   display: flex;
   flex-direction: column;
   min-height: 520px;
+  min-width: 0;
 }
 
 .wizard-header {
@@ -530,12 +560,17 @@ input, select, textarea, button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
 }
 
 .wizard-title {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .wizard-progress {
@@ -574,6 +609,7 @@ input, select, textarea, button {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
 }
 
 /* Choice Cards */
@@ -855,6 +891,7 @@ input, select, textarea, button {
   display: flex;
   flex-direction: column;
   gap: 32px;
+  flex: 0 0 260px;
 }
 
 .admin-nav {
@@ -883,6 +920,7 @@ input, select, textarea, button {
 
 .admin-main {
   flex: 1;
+  min-width: 0;
   padding: 40px;
   overflow-y: auto;
 }
@@ -914,6 +952,12 @@ input, select, textarea, button {
   width: 100%;
   border-collapse: collapse;
   text-align: left;
+  min-width: 680px;
+}
+
+.admin-card {
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .admin-table th, .admin-table td {
@@ -1026,18 +1070,50 @@ input, select, textarea, button {
   margin-bottom: 16px;
 }
 
+/* Laptop and tablet sizing. The previous stylesheet jumped directly from
+   desktop values to a narrow mobile layout at 768px, which made 10-13 inch
+   laptop and tablet viewports feel cramped or overflow horizontally. */
+@media (max-width: 1100px) {
+  .landing-split-container {
+    max-width: 900px;
+  }
+
+  .admin-main {
+    padding: 32px clamp(20px, 4vw, 40px);
+  }
+
+  .preview-container {
+    padding: 48px clamp(32px, 6vw, 80px);
+  }
+}
+
 /* Simple responsive rules */
 @media (max-width: 768px) {
   .top-nav {
-    padding: 12px 16px;
+    padding: 12px var(--page-gutter);
     flex-direction: column;
     gap: 12px;
     align-items: center;
     text-align: center;
   }
+
+  .top-nav-actions {
+    width: 100%;
+    justify-content: center;
+    gap: 10px;
+  }
+
+  .top-nav-actions > div:first-child {
+    margin-right: 0 !important;
+  }
   
   .wizard-body {
-    padding: 24px 16px;
+    padding: 32px var(--page-gutter);
+  }
+
+  .wizard-header, .wizard-footer {
+    padding-left: var(--page-gutter);
+    padding-right: var(--page-gutter);
   }
   
   .review-data-grid {
@@ -1083,14 +1159,15 @@ input, select, textarea, button {
 
   .admin-sidebar {
     width: 100%;
-    padding: 24px 16px;
+    flex-basis: auto;
+    padding: 24px var(--page-gutter);
     border-right: none;
     border-bottom: 1px solid var(--border-light);
     gap: 16px;
   }
 
   .admin-main {
-    padding: 24px 16px;
+    padding: 24px var(--page-gutter);
   }
   
   .preview-nav {
@@ -1108,6 +1185,95 @@ input, select, textarea, button {
     flex-direction: column;
     gap: 8px;
     width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    min-height: calc(100dvh - 120px);
+    padding: 20px max(12px, env(safe-area-inset-left)) max(28px, env(safe-area-inset-bottom));
+  }
+
+  .top-nav {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .top-nav-actions .accent-picker {
+    order: 3;
+    width: 100%;
+    justify-content: center;
+  }
+
+  .landing-split-container {
+    gap: 24px;
+  }
+
+  .landing-hero-title {
+    font-size: clamp(34px, 12vw, 44px);
+    letter-spacing: -1px;
+  }
+
+  .landing-right {
+    display: none;
+  }
+
+  .wizard-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .wizard-title {
+    max-width: 100%;
+  }
+
+  .wizard-footer {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+
+  .wizard-footer .btn {
+    width: 100%;
+  }
+
+  .review-section-card, .admin-card {
+    padding: 16px;
+  }
+
+  .admin-page-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .admin-page-title {
+    font-size: 21px;
+  }
+
+  .doc-signatures {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .doc-sig-block {
+    width: 100%;
+  }
+
+  .smart-fill-container {
+    bottom: max(12px, env(safe-area-inset-bottom));
+    right: max(12px, env(safe-area-inset-right));
+    left: max(12px, env(safe-area-inset-left));
+  }
+
+  .smart-fill-panel {
+    width: min(340px, calc(100vw - 24px));
+    max-width: 100%;
+  }
+
+  .smart-fill-fab {
+    min-height: 48px;
   }
 }
 
@@ -1394,4 +1560,3 @@ input, select, textarea, button {
 .dark-theme .smart-fill-flag-text {
   color: #fbbf24;
 }
-
